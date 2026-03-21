@@ -1,0 +1,11 @@
+[project]
+name = "pycrew"
+version = "0.1.0"
+description = "PyCrew - A backend-agnostic framework for supervisor-worker architectures"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
