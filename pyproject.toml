@@ -4,8 +4,15 @@ version = "0.1.0"
 description = "PyCrew - A backend-agnostic framework for supervisor-worker architectures"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "loguru>=0.7.3",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.9",
+]
