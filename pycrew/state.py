@@ -92,6 +92,12 @@ class StateMachine(Generic[TState, TEvent]):
         except KeyError:
             raise InvalidTransitionError(state, event)
 
+    def get_events(self, state: TState) -> list[TEvent]:
+        try:
+            return list(self._transitions[state].keys())  # pyright: ignore[reportAttributeAccessIssue]
+        except (AttributeError, KeyError):
+            return []
+
     @property
     def pretty_printer(self) -> IPrettyPrinter:
         if self._pretty_printer is None:

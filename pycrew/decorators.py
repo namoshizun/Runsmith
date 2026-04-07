@@ -1,40 +1,40 @@
+from collections.abc import Callable
 from typing import TypeVar
-
-TState = TypeVar("TState", bound=str)
-TEvent = TypeVar("TEvent", bound=str)
 
 HOOK_ATTR = "_pycrew_hooks"
 
+_F = TypeVar("_F", bound=Callable)
 
-def _attach_hook(func, hook: tuple):
+
+def _attach_hook(func: _F, hook: tuple) -> _F:
     hooks = getattr(func, HOOK_ATTR, [])
     hooks.append(hook)
-    func._pycrew_hooks = hooks  # noqa: B010
+    setattr(func, HOOK_ATTR, hooks)
     return func
 
 
-def pre(tgt: TState, event: TEvent):
+def pre(tgt: str, event: str):
     """Called when entering `tgt` state via `event`."""
 
-    def decor(func):
+    def decor(func: _F) -> _F:
         return _attach_hook(func, ("pre", tgt, event))
 
     return decor
 
 
-def post(src: TState, event: TEvent):
+def post(src: str, event: str):
     """Called when leaving `src` state via `event`."""
 
-    def decor(func):
+    def decor(func: _F) -> _F:
         return _attach_hook(func, ("post", src, event))
 
     return decor
 
 
-def actor(state: TState):
+def actor(state: str):
     """Registers a generator method as the activity handler for `state`."""
 
-    def decor(func):
+    def decor(func: _F) -> _F:
         return _attach_hook(func, ("actor", state))
 
     return decor
