@@ -2,6 +2,7 @@ import asyncio
 import multiprocessing
 import signal
 import threading
+from collections.abc import AsyncGenerator, Generator
 from multiprocessing.queues import Queue as MPQueue
 from multiprocessing.synchronize import Event as MPEvent
 from queue import Queue
@@ -10,7 +11,14 @@ from typing import Any, Protocol, TypeVar
 from loguru import logger
 
 from pycrew.core import EXIT_SIGNALS, IEvent, IQueue
-from pycrew.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
+from pycrew.worker import (
+    AsyncWorker,
+    AsyncWorkerLoop,
+    SyncWorker,
+    SyncWorkerLoop,
+    WorkerActivity,
+    WorkerBase,
+)
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase, covariant=True)
 
@@ -31,6 +39,44 @@ class IExecutor(Protocol[WorkerT]):
     def kill(self) -> None: ...
 
 
+def drive_sync_worker(
+    execution: SyncWorkerLoop, term_event: IEvent
+) -> Generator[WorkerActivity, None, None]:
+    stop_sent = False
+    yield next(execution)
+
+    while True:
+        if term_event.is_set() and not stop_sent:
+            cmd = "stop"
+            stop_sent = True
+        else:
+            cmd = "tick"
+
+        try:
+            yield execution.send(cmd)
+        except StopIteration:
+            return
+
+
+async def drive_async_worker(
+    execution: AsyncWorkerLoop, term_event: IEvent
+) -> AsyncGenerator[WorkerActivity, None]:
+    stop_sent = False
+    yield await execution.asend(None)
+
+    while True:
+        if term_event.is_set() and not stop_sent:
+            cmd = "stop"
+            stop_sent = True
+        else:
+            cmd = "tick"
+
+        try:
+            yield await execution.asend(cmd)
+        except StopIteration:
+            return
+
+
 class ThreadExecutor(threading.Thread):
     def __init__(
         self,
@@ -47,15 +93,8 @@ class ThreadExecutor(threading.Thread):
         self.activity_queue = activity_queue
 
     def run(self):
-        execution = self.worker.main_loop()
-        initial_beat = execution.send(None)
-        self.activity_queue.put_nowait(initial_beat)
-
-        while not self.term_event.is_set():
-            activity = execution.send("tick")
+        for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
             self.activity_queue.put_nowait(activity)
-
-        execution.send("stop")
 
     def stop(self):
         self.term_event.set()
@@ -85,15 +124,8 @@ class ProcessExecutor(multiprocessing.Process):
         for sig in EXIT_SIGNALS:
             signal.signal(sig, signal.Handlers.SIG_IGN)
 
-        execution = self.worker.main_loop()
-        initial_beat = execution.send(None)
-        self.activity_queue.put_nowait(initial_beat)
-
-        while not self.term_event.is_set():
-            activity = execution.send("tick")
+        for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
             self.activity_queue.put_nowait(activity)
-
-        execution.send("stop")
 
     def stop(self):
         self.term_event.set()
@@ -113,16 +145,8 @@ class CoroutineExecutor:
         self.__task = None
 
     async def _task(self):
-        execution = self.worker.main_loop()
-
-        initial_beat = await execution.asend(None)
-        self.activity_queue.put_nowait(initial_beat)
-
-        while not self.term_event.is_set():
-            activity = await execution.asend("tick")
+        async for activity in drive_async_worker(self.worker.main_loop(), self.term_event):
             self.activity_queue.put_nowait(activity)
-
-        await execution.asend("stop")
 
     def start(self):
         self.__task = asyncio.create_task(self._task(), name=self.worker.name)

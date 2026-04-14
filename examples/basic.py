@@ -1,20 +1,34 @@
+import signal
+import threading
 import time
 
+from loguru import logger
+
 from pycrew.decorators import actor, post
-from pycrew.defaults import DefaultWorkerFSM
+from pycrew.execution import drive_sync_worker
 from pycrew.worker import ExecutorCommand, SyncWorker
+
+TERM_EVENT = threading.Event()
+
+
+def handle_exit():
+    def handler(sig_num: int, *_):
+        TERM_EVENT.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
+        signal.signal(sig, handler)
 
 
 class BasicWorker(SyncWorker):
     @post("running", "error")
     @post("terminating", "error")
     def on_error(self):
-        print(f"Something really bad happened!!!! Exception: {self.ctx.exception}")
+        logger.info(f"Something really bad happened!!!! Exception: {self.ctx.exception}")
 
     @actor("starting")
     def setup(self):
         time.sleep(0.5)
-        print("Initialization done 🤗")
+        logger.info("Initialization done 🤗")
         return self.emit("run")
 
     @actor("running")
@@ -27,11 +41,13 @@ class BasicWorker(SyncWorker):
 
     @actor("terminating")
     def graceful_shutdown(self):
+        logger.info("Peace out ✌️")
         time.sleep(0.1)
         return self.emit("complete")
 
 
 if __name__ == "__main__":
-    worker = BasicWorker("foo", DefaultWorkerFSM)
-    for activity in worker.main_loop():
-        print(activity)
+    handle_exit()
+    worker = BasicWorker("foo")
+    for activity in drive_sync_worker(worker.main_loop(), TERM_EVENT):
+        logger.info(activity)

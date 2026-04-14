@@ -22,7 +22,7 @@ else:
 
 from pycrew.core import ExecutorCommand, WorkerRunContext
 from pycrew.decorators import HOOK_ATTR
-from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
+from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerFSM, DefaultWorkerState
 from pycrew.state import StateMachine
 
 _mono_now = time.monotonic
@@ -78,9 +78,9 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
 
         cls._hooks = hooks
 
-    def __init__(self, name: str, fsm: StateMachine[TState, TEvent]):
+    def __init__(self, name: str, fsm: StateMachine[TState, TEvent] = DefaultWorkerFSM):
         self.name = name
-        self.fsm = fsm
+        self.fsm = copy.deepcopy(fsm)
         self.ctx: WorkerRunContext = WorkerRunContext()
         self._state: TState = self.fsm.get_initial_state()
 
@@ -185,4 +185,4 @@ class SyncWorker(WorkerBase[TState, TEvent]):
 class AsyncWorker(WorkerBase[TState, TEvent]):
     async def main_loop(self) -> AsyncWorkerLoop:
         worker_name = self.name
-        cmd = yield WorkerActivity(worker_name=worker_name, kind="heartbeat")
+        yield WorkerActivity(worker_name=worker_name, kind="heartbeat")

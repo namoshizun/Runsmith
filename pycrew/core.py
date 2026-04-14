@@ -6,12 +6,7 @@ from typing import Any, Callable, Generic, Literal, Protocol, TypeVar, overload
 
 _mono_now = time.monotonic
 
-EXIT_SIGNALS = (
-    signal.SIGTERM,
-    signal.SIGINT,
-    signal.SIGQUIT,
-    signal.SIGABRT,
-)
+EXIT_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT)
 
 
 T = TypeVar("T")
