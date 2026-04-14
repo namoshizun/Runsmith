@@ -2,7 +2,7 @@ import dataclasses
 import signal
 import time
 from collections import deque
-from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import Any, Callable, Generic, Literal, Protocol, TypeVar, overload
 
 _mono_now = time.monotonic
 
@@ -25,7 +25,10 @@ class IEvent(Protocol):
 class IQueue(Protocol, Generic[T]):
     def put(self, item: T) -> None: ...
     def put_nowait(self, item: T) -> None: ...
+    @overload
     def get(self) -> T: ...
+    @overload
+    def get(self, block: bool = True, timeout: float | None = None) -> T: ...
     def get_nowait(self) -> T: ...
 
 
@@ -53,5 +56,7 @@ class WorkerRunContext:
     def set_data(self, data: Any):
         self.data = data
 
+
+ExecutorCommand = Literal["tick", "stop"] | None
 
 SyncTransitionEffectHook = Callable[[Any], None]

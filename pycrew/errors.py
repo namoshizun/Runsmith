@@ -1,4 +1,4 @@
-class MultipleInitialStatesError(ValueError):
+class InvalidStateMachineError(ValueError):
     pass
 
 

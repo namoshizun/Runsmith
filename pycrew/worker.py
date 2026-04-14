@@ -1,6 +1,7 @@
 import abc
 import copy
 import dataclasses
+import inspect
 import sys
 import time
 from collections.abc import AsyncGenerator, Generator
@@ -19,7 +20,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from pycrew.core import WorkerRunContext
+from pycrew.core import ExecutorCommand, WorkerRunContext
 from pycrew.decorators import HOOK_ATTR
 from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
 from pycrew.state import StateMachine
@@ -28,8 +29,6 @@ _mono_now = time.monotonic
 
 TEvent = TypeVar("TEvent", bound=str, default=DefaultWorkerEvent)
 TState = TypeVar("TState", bound=str, default=DefaultWorkerState)
-
-ExecutorCommand = Literal["tick", "stop"]
 
 
 @dataclasses.dataclass(slots=True)
@@ -89,14 +88,16 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
     def before_exit(self, is_graceful: bool):
         raise NotImplementedError
 
-    # def on_transition(self, src: TState, event: TEvent, tgt: TState):
-    #     logger.opt(colors=True).info(
-    #         f"<e>Worker [{self.name}] state transitioning</e>: {src} -[{event}]-> {tgt}"
-    #     )
-    #     self.ctx.add_transition(event, tgt)
+    @cache
+    def get_actor_func(self, name: str):
+        try:
+            func_name = self._hooks.actors[name]
+            func = getattr(self, func_name)
 
-    def get_state(self) -> TState:
-        return self._state
+            params = inspect.signature(func).parameters
+            return func, "cmd" in params
+        except (KeyError, AttributeError):
+            return None
 
     def clone(self) -> Self:
         return self.__class__(name=self.name, fsm=self.fsm)
@@ -106,24 +107,18 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         return signal
 
 
-class CrewSyncWorker(WorkerBase[TState, TEvent]):
-    @cache
-    def get_actor_func(self, name: str):
-        try:
-            func_name = self._hooks.actors[name]
-            func = getattr(self, func_name)
-            return func
-        except (KeyError, AttributeError):
-            return None
-
+class SyncWorker(WorkerBase[TState, TEvent]):
     def before_exit(self, is_graceful: bool):
         logger.opt(colors=True).info(
             f"<e>Worker [{self.name}] is exiting from {self._state} {'(gracefully)' if is_graceful else '(abnormally)'} 👋</e>"
         )
 
-    def _exec_actor(self, state: TState) -> TEvent | Literal["keepalive"]:
-        actor_func = self.get_actor_func(state)
-        if actor_func is None:
+    def _exec_actor(self, state: TState, cmd: ExecutorCommand) -> TEvent | Literal["keepalive"]:
+        if self._state is self.fsm.get_initial_state():
+            return self.fsm.get_initial_event()
+
+        actor_inspect = self.get_actor_func(state)
+        if actor_inspect is None:
             # Fall through to the default event if no actor registered
             event_options = self.fsm.get_events(state)
             if len(event_options) != 1:
@@ -137,18 +132,32 @@ class CrewSyncWorker(WorkerBase[TState, TEvent]):
             )
             return fallback_event
 
-        assert actor_func is not None
-        return actor_func()
+        assert actor_inspect is not None
+        func, accepts_cmd = actor_inspect
+
+        if accepts_cmd:
+            return func(cmd=cmd)
+        return func()
 
     def main_loop(self) -> SyncWorkerLoop:
         MakeActivity = lambda **kwargs: WorkerActivity(worker_name=self.name, **kwargs)  # pyright: ignore[reportUnknownVariableType]  # noqa: N806
+        terminal_states = self.fsm.get_terminal_states()
 
-        event = self.fsm.get_initial_event()
+        # Send the initial heartbeat to indicate the start of the loop
         cmd: ExecutorCommand = yield MakeActivity(kind="heartbeat")
-        terminate = cmd == "stop"
+        graceful_terminated = False
 
         try:
-            while not terminate:
+            while self._state not in terminal_states:
+                event_or_beat = self._exec_actor(self._state, cmd)
+
+                # Heart-beating
+                if event_or_beat == "keepalive":
+                    cmd = yield MakeActivity(kind="heartbeat")
+                    continue
+
+                # State transition
+                event = cast(TEvent, event_or_beat)
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
@@ -162,30 +171,18 @@ class CrewSyncWorker(WorkerBase[TState, TEvent]):
 
                 self._state = tgt
                 cmd = yield MakeActivity(kind="transition_end", transition=transition)
+                self.ctx.add_transition(event, tgt)
 
-                if tgt in self.fsm.get_terminal_states():
-                    # FSM has halted
-                    terminate = True
-                    return
-
-                # Stay in tgt state until the actor yields an event
-                while not (terminate := (cmd == "stop")):
-                    match self._exec_actor(tgt):
-                        case "keepalive":
-                            cmd = yield MakeActivity(kind="heartbeat")
-                        case next_event:
-                            event = cast(TEvent, next_event)
-                            break
-
+            graceful_terminated = True
         except Exception as e:
             logger.exception(f"Worker [{self.name}] encountered an error: {e}")
             self.ctx.set_exception(e)
             raise e
         finally:
-            self.before_exit(terminate)
+            self.before_exit(graceful_terminated)
 
 
-class CrewAsyncWorker(WorkerBase[TState, TEvent]):
+class AsyncWorker(WorkerBase[TState, TEvent]):
     async def main_loop(self) -> AsyncWorkerLoop:
         worker_name = self.name
         cmd = yield WorkerActivity(worker_name=worker_name, kind="heartbeat")

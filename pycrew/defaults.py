@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from types import EllipsisType
 from typing import Literal, TextIO
 
-from pycrew.constraints import HeartbeatTimeout, Timeout, TransitionTimeout
+from pycrew.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
 from pycrew.state import StateMachine, TransitionTable
 
 DefaultWorkerState = Literal["idle", "starting", "running", "terminating", "crashed", "stopped"]
@@ -19,10 +19,16 @@ DefaultWorkerTransitionTable: TransitionTable[DefaultWorkerState, DefaultWorkerE
 }
 
 DefaultWorkerConstraints: Iterable[Timeout] = [
+    # Actor liveness
     HeartbeatTimeout(timeout=2, when="running"),
-    TransitionTimeout(timeout=10, when="starting -> running"),
-    TransitionTimeout(timeout=3, when="running -> terminating"),
-    TransitionTimeout(timeout=10, when="terminating -> stopped"),
+    # Transition hook guards
+    TransitionTimeout(timeout=1, when="idle -> starting"),
+    TransitionTimeout(timeout=1, when="starting -> running"),
+    TransitionTimeout(timeout=1, when="running -> terminating"),
+    TransitionTimeout(timeout=1, when="terminating -> stopped"),
+    # State residence caps
+    StateTimeout(timeout=10, when="starting"),
+    StateTimeout(timeout=10, when="terminating"),
 ]
 
 
@@ -53,20 +59,23 @@ class DefaultFSNPrettyPrinter:
 
     def _constraint_print_hints(
         self,
-    ) -> tuple[dict[str, float], dict[tuple[str, str], float]]:
-        """Per-state keepalives and per-(source,target) transition timeouts."""
+    ) -> tuple[dict[str, float], dict[tuple[str, str], float], dict[str, float]]:
+        """Per-state keepalives, per-(source,target) transition timeouts, and state timeouts."""
         keepalive: dict[str, float] = {}
         transition: dict[tuple[str, str], float] = {}
+        state_timeout: dict[str, float] = {}
         for c in self.fsm.get_constraints():
             match c:
                 case HeartbeatTimeout():
                     keepalive[c.when] = c.timeout
                 case TransitionTimeout():
-                    src, _, tgt = c.when.partition("->")
-                    transition[(src.strip(), tgt.strip())] = c.timeout
+                    src, tgt = c.get_src_and_tgt()
+                    transition[(src, tgt)] = c.timeout
+                case StateTimeout():
+                    state_timeout[c.when] = c.timeout
                 case _:
                     pass
-        return keepalive, transition
+        return keepalive, transition, state_timeout
 
     def print(self) -> None:
         """
@@ -91,7 +100,7 @@ class DefaultFSNPrettyPrinter:
               error → crashed
         """
         initial = self.fsm.get_initial_state()
-        keepalives, trans_timeouts = self._constraint_print_hints()
+        keepalives, trans_timeouts, state_timeouts = self._constraint_print_hints()
 
         lines: list[str] = []
         for state in self._states_in_print_order():
@@ -103,6 +112,7 @@ class DefaultFSNPrettyPrinter:
                 (["initial"] if state == initial else [])
                 + (["terminal"] if state in self.fsm.get_terminal_states() else [])
                 + ([f"keepalive={keepalives[state]}"] if state in keepalives else [])
+                + ([f"state_timeout={state_timeouts[state]}"] if state in state_timeouts else [])
             )
             suffix = f"  ({', '.join(tags)})" if tags else ""
             lines.append(f"{prefix}{state}{suffix}")

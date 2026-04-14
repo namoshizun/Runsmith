@@ -1,14 +1,11 @@
-import itertools
 import time
 
 from pycrew.decorators import actor, post
 from pycrew.defaults import DefaultWorkerFSM
-from pycrew.worker import CrewSyncWorker
-
-count = itertools.count()
+from pycrew.worker import ExecutorCommand, SyncWorker
 
 
-class BasicWorker(CrewSyncWorker):
+class BasicWorker(SyncWorker):
     @post("running", "error")
     @post("terminating", "error")
     def on_error(self):
@@ -21,8 +18,8 @@ class BasicWorker(CrewSyncWorker):
         return self.emit("run")
 
     @actor("running")
-    def tick(self):
-        if next(count) > 3:
+    def sleepy(self, *, cmd: ExecutorCommand):
+        if cmd == "stop":
             return self.emit("terminate")
 
         time.sleep(1)

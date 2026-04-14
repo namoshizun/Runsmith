@@ -10,7 +10,7 @@ from typing import Any, Protocol, TypeVar
 from loguru import logger
 
 from pycrew.core import EXIT_SIGNALS, IEvent, IQueue
-from pycrew.worker import CrewAsyncWorker, CrewSyncWorker, WorkerActivity, WorkerBase
+from pycrew.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase, covariant=True)
 
@@ -34,9 +34,9 @@ class IExecutor(Protocol[WorkerT]):
 class ThreadExecutor(threading.Thread):
     def __init__(
         self,
-        worker: CrewSyncWorker,
+        worker: SyncWorker,
         term_event: threading.Event,
-        activity_queue: Queue[WorkerActivity],
+        activity_queue: Queue[WorkerActivity] | MPQueue,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -48,7 +48,9 @@ class ThreadExecutor(threading.Thread):
 
     def run(self):
         execution = self.worker.main_loop()
-        execution.send("tick")
+        initial_beat = execution.send(None)
+        self.activity_queue.put_nowait(initial_beat)
+
         while not self.term_event.is_set():
             activity = execution.send("tick")
             self.activity_queue.put_nowait(activity)
@@ -65,7 +67,7 @@ class ThreadExecutor(threading.Thread):
 class ProcessExecutor(multiprocessing.Process):
     def __init__(
         self,
-        worker: CrewSyncWorker,
+        worker: SyncWorker,
         term_event: MPEvent,
         activity_queue: MPQueue,
         **kwargs: Any,
@@ -84,7 +86,9 @@ class ProcessExecutor(multiprocessing.Process):
             signal.signal(sig, signal.Handlers.SIG_IGN)
 
         execution = self.worker.main_loop()
-        execution.send("tick")
+        initial_beat = execution.send(None)
+        self.activity_queue.put_nowait(initial_beat)
+
         while not self.term_event.is_set():
             activity = execution.send("tick")
             self.activity_queue.put_nowait(activity)
@@ -98,7 +102,7 @@ class ProcessExecutor(multiprocessing.Process):
 class CoroutineExecutor:
     def __init__(
         self,
-        worker: CrewAsyncWorker,
+        worker: AsyncWorker,
         term_event: asyncio.Event,
         activity_queue: asyncio.Queue[WorkerActivity],
     ):
@@ -111,7 +115,9 @@ class CoroutineExecutor:
     async def _task(self):
         execution = self.worker.main_loop()
 
-        await execution.asend("tick")
+        initial_beat = await execution.asend(None)
+        self.activity_queue.put_nowait(initial_beat)
+
         while not self.term_event.is_set():
             activity = await execution.asend("tick")
             self.activity_queue.put_nowait(activity)

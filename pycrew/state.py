@@ -4,8 +4,8 @@ from collections.abc import Iterable
 from types import EllipsisType
 from typing import Generic, Protocol, TypeVar
 
-from pycrew.constraints import Timeout
-from pycrew.errors import InvalidTransitionError, MultipleInitialStatesError
+from pycrew.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
+from pycrew.errors import InvalidStateMachineError, InvalidTransitionError
 
 TState = TypeVar("TState", bound=str)
 TEvent = TypeVar("TEvent", bound=str)
@@ -31,10 +31,12 @@ class StateMachine(Generic[TState, TEvent]):
         self._terminal_states: set[TState] = set()
         self._constraints: tuple[Timeout, ...] = tuple(constraints)
 
-        # Verify state machine
+        # Parse the state machine
         self.__build_states()
 
-        # Verify initialization
+        # Run verifications
+        self.__verify_constraints()
+
         try:
             assert self._initial_state is not None
             self.get_target_state(self._initial_state, self._initial_event)
@@ -45,8 +47,25 @@ class StateMachine(Generic[TState, TEvent]):
 
         self._pretty_printer = pretty_printer
 
+    def __verify_constraints(self):
+        for c in self._constraints:
+            match c:
+                case HeartbeatTimeout():
+                    if c.when not in self._transitions:
+                        raise ValueError(f"Heartbeat timeout for unknown state: {c.when}")
+                case TransitionTimeout():
+                    src, tgt = c.get_src_and_tgt()
+                    options = self._transitions.get(src, {})  # pyright: ignore
+                    if tgt not in options.values():
+                        raise ValueError(
+                            f"Invalid transition options for the transition timeout constraint: {c.when}"
+                        )
+                case StateTimeout():
+                    if c.when not in self._transitions:
+                        raise ValueError(f"State timeout for unknown state: {c.when}")
+
     def __build_states(self):
-        # First pass: collect the initial state
+        # Walk through the FSM to collect the initial and terminal states
         initial_states = set(self._transitions.keys())
         for src_state, trans in self._transitions.items():
             if isinstance(trans, EllipsisType):
@@ -57,18 +76,14 @@ class StateMachine(Generic[TState, TEvent]):
                 initial_states.discard(tgt_state)
 
         if len(initial_states) != 1:
-            raise MultipleInitialStatesError(
+            raise InvalidStateMachineError(
                 f"Expected exactly one initial state, got {len(initial_states)}"
             )
 
         self._initial_state = next(iter(initial_states))
 
-        # Second pass: collect the terminal states
-        self._terminal_states = set(
-            src_state
-            for src_state, trans in self._transitions.items()
-            if isinstance(trans, EllipsisType)
-        )
+        if not self._terminal_states:
+            raise InvalidStateMachineError("No terminal states found")
 
     def get_initial_state(self) -> TState:
         assert self._initial_state is not None
