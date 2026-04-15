@@ -11,3 +11,4 @@
 
 ## Tooling
 - Use loguru instead of the builtin logging module
+- Write all Python tests as `pytest` style functions, not `unittest` classes.

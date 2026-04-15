@@ -2,7 +2,7 @@ import dataclasses
 import signal
 import time
 from collections import deque
-from typing import Any, Callable, Generic, Literal, Protocol, TypeVar, overload
+from typing import Any, Callable, Generic, Literal, Protocol, TypeVar
 
 _mono_now = time.monotonic
 
@@ -17,14 +17,11 @@ class IEvent(Protocol):
     def is_set(self) -> bool: ...
 
 
-class IQueue(Protocol, Generic[T]):
-    def put(self, item: T) -> None: ...
-    def put_nowait(self, item: T) -> None: ...
-    @overload
-    def get(self) -> T: ...
-    @overload
-    def get(self, block: bool = True, timeout: float | None = None) -> T: ...
-    def get_nowait(self) -> T: ...
+EnqueueItem = TypeVar("EnqueueItem", contravariant=True)
+
+
+class IEnqueue(Protocol, Generic[EnqueueItem]):
+    def put_nowait(self, item: EnqueueItem) -> None: ...
 
 
 @dataclasses.dataclass(slots=True)

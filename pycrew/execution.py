@@ -10,7 +10,7 @@ from typing import Any, Protocol, TypeVar
 
 from loguru import logger
 
-from pycrew.core import EXIT_SIGNALS, IEvent, IQueue
+from pycrew.core import EXIT_SIGNALS, IEnqueue, IEvent
 from pycrew.worker import (
     AsyncWorker,
     AsyncWorkerLoop,
@@ -29,7 +29,7 @@ class IExecutor(Protocol[WorkerT]):
     @property
     def name(self) -> str: ...
     @property
-    def activity_queue(self) -> IQueue[WorkerActivity]: ...
+    def activity_queue(self) -> IEnqueue[WorkerActivity]: ...
     @property
     def term_event(self) -> IEvent: ...
 
