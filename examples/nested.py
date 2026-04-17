@@ -17,12 +17,19 @@ def root_thread_supervisor():
 
 
 def root_process_supervisor():
-    root_sup = SyncSupervisor("root", "process")
-    child_sup = SyncSupervisor("child", "thread")
-
+    """
+    root supervisor
+    ├── child supervisor (process)
+    │   ├── foo (thread)
+    │   └── bar (thread)
+    └── baz (process)
+    """
     worker1 = SleepyWorker("foo")
     worker2 = SleepyWorker("bar")
     worker3 = SleepyWorker("baz")
+
+    root_sup = SyncSupervisor("root", "process")
+    child_sup = SyncSupervisor("child", "thread")
 
     child_sup.register_workers(worker1, worker2)
     root_sup.register_workers(child_sup, worker3)

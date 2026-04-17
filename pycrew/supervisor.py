@@ -1,12 +1,12 @@
+import asyncio
 import multiprocessing
 import signal
 import sys
 import threading
 import time
 from dataclasses import dataclass
-from multiprocessing.queues import Queue as MPQueue
 from queue import Empty, Queue
-from typing import Callable, Generic, Literal, TypeVar
+from typing import Callable, Generic, Literal, TypeVar, cast
 
 from loguru import logger
 
@@ -25,10 +25,16 @@ else:
 from pycrew.core import EXIT_SIGNALS, ExecutorCommand, IQueue
 from pycrew.decorators import actor, post
 from pycrew.evaluator import WorkerStatusEvaluator
-from pycrew.execution import IExecutor, ProcessExecutor, ThreadExecutor, drive_sync_worker
+from pycrew.execution import (
+    CoroutineExecutor,
+    IExecutor,
+    ProcessExecutor,
+    ThreadExecutor,
+    drive_sync_worker,
+)
 from pycrew.settings import settings
 from pycrew.utils import Timer
-from pycrew.worker import SyncWorker, WorkerActivity, WorkerBase
+from pycrew.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase)
 
@@ -50,8 +56,10 @@ class SupervisionUnit(Generic[WorkerT]):
 
 
 class SupervisorBase(Generic[WorkerT]):
-    def __init__(self):
+    def __init__(self, executor_type: Literal["thread", "process", "coroutine"]):
         self._activity_queue: IQueue[WorkerActivity] | None = None
+        self._worker_templates: dict[str, WorkerT] = dict()
+        self.executor_type = executor_type
         self.units: dict[str, SupervisionUnit[WorkerT]] = dict()  # worker name => unit
 
     @property
@@ -59,6 +67,45 @@ class SupervisorBase(Generic[WorkerT]):
         if self._activity_queue is None:
             raise RuntimeError("Activity queue not yet initialized")
         return self._activity_queue
+
+    def materialize_units(self, *, worker_name: str | None = None):
+        for worker in self._worker_templates.values():
+            if worker_name and worker.name != worker_name:
+                continue
+
+            # Build the executor
+            _worker = worker.clone()
+            match self.executor_type:
+                case "thread":
+                    _executor = ThreadExecutor(
+                        worker=cast(SyncWorker, _worker),
+                        term_event=threading.Event(),
+                        activity_queue=self.activity_queue,
+                    )
+                case "process":
+                    _executor = ProcessExecutor(
+                        worker=cast(SyncWorker, _worker),
+                        term_event=multiprocessing.Event(),
+                        activity_queue=self.activity_queue,
+                    )
+                case "coroutine":
+                    _executor = CoroutineExecutor(
+                        worker=cast(AsyncWorker, _worker),
+                        term_event=asyncio.Event(),
+                        activity_queue=self.activity_queue,
+                    )
+                case _:
+                    raise ValueError(f"Invalid executor type: {self.executor_type}")
+
+            # Build the supervision unit
+            self.units[worker.name] = SupervisionUnit[WorkerT](
+                worker=_worker,
+                executor=_executor,
+                evaluator=WorkerStatusEvaluator(worker.fsm),
+                restart_quota=settings.supervisor_restart_quota
+                if isinstance(worker, SupervisorBase)
+                else settings.worker_restart_quota,
+            )
 
     def start_executors(self):
         if not self.units:
@@ -100,18 +147,12 @@ class SyncSupervisor(
                 "SyncSupervisor only supports 'thread' and 'process' executors"
             )
 
-        SupervisorBase.__init__(self)
+        SupervisorBase.__init__(self, executor_type=executor_type)
         SyncWorker.__init__(self, name=name)
-        self.executor_type = executor_type
-
-        if executor_type == "thread":
-            self._activity_queue = Queue[WorkerActivity]()
-        else:
-            self._activity_queue = multiprocessing.Queue()
 
     def clone(self) -> Self:
         instance = self.__class__(name=self.name, executor_type=self.executor_type)  # pyright: ignore[reportArgumentType]
-        workers: list[SyncWorker] = [u.worker.clone() for u in self.units.values()]
+        workers: list[SyncWorker] = [w.clone() for w in self._worker_templates.values()]
         instance.register_workers(*workers)
         return instance
 
@@ -123,28 +164,7 @@ class SyncSupervisor(
             )
 
         for worker in workers:
-            # Build the executor
-            if self.executor_type == "thread":
-                _executor = ThreadExecutor(
-                    worker=worker, term_event=threading.Event(), activity_queue=self.activity_queue
-                )
-            else:
-                assert isinstance(self.activity_queue, MPQueue)
-                _executor = ProcessExecutor(
-                    worker=worker,
-                    term_event=multiprocessing.Event(),
-                    activity_queue=self.activity_queue,
-                )
-
-            # Build the supervision unit
-            self.units[worker.name] = SupervisionUnit[SyncWorker](
-                worker=worker,
-                executor=_executor,
-                evaluator=WorkerStatusEvaluator(worker.fsm),
-                restart_quota=settings.supervisor_restart_quota
-                if isinstance(worker, SyncSupervisor)
-                else settings.worker_restart_quota,
-            )
+            self._worker_templates[worker.name] = worker
 
     def run(self, on_activity: OnActivityCallback = noop):
         # The root supervisor's entry point
@@ -164,6 +184,14 @@ class SyncSupervisor(
     @actor("starting")
     def _boot(self):
         try:
+            # Initialize the activity queue
+            if self.executor_type == "thread":
+                self._activity_queue = Queue[WorkerActivity]()
+            else:
+                self._activity_queue = multiprocessing.Queue()
+
+            # Materialize and start all the units
+            self.materialize_units()
             self.start_executors()
             logger.opt(colors=True).info(
                 f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
@@ -207,8 +235,7 @@ class SyncSupervisor(
                 del self.units[name]
 
                 # Replace it with the new unit
-                self.register_workers(unit.worker.clone())
-
+                self.materialize_units(worker_name=name)
                 unit = self.units[name]
                 unit.restart_count = restart_count
                 unit.executor.start()
@@ -225,12 +252,6 @@ class SyncSupervisor(
             return self.emit("complete")
 
         self.stop_executors()
-        """
-        NOTE: Actually, we should expect each worker to emit a state transition
-        event soon after the stop command is sent. If the worker's main loop
-        isn't properly implemented, it may not respond to the stop command and just
-        stays in the running state, in which case it should be evaluated as unhealthy.
-        """
         time.sleep(2 * settings.supervision_interval)
 
         # Forcefully terminate workers that linger for too long

@@ -84,9 +84,10 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         self.ctx: WorkerRunContext = WorkerRunContext()
         self._state: TState = self.fsm.get_initial_state()
 
-    @abc.abstractmethod
     def before_exit(self, is_graceful: bool):
-        raise NotImplementedError
+        logger.opt(colors=True).info(
+            f"<e>Worker [{self.name}] is exiting from {self._state} {'(gracefully)' if is_graceful else '(abnormally)'} 👋</e>"
+        )
 
     @cache
     def get_actor_func(self, name: str):
@@ -108,11 +109,6 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
 
 
 class SyncWorker(WorkerBase[TState, TEvent]):
-    def before_exit(self, is_graceful: bool):
-        logger.opt(colors=True).info(
-            f"<e>Worker [{self.name}] is exiting from {self._state} {'(gracefully)' if is_graceful else '(abnormally)'} 👋</e>"
-        )
-
     def _exec_actor(self, state: TState, cmd: ExecutorCommand) -> TEvent | Literal["keepalive"]:
         if self._state is self.fsm.get_initial_state():
             return self.fsm.get_initial_event()
