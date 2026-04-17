@@ -4,15 +4,15 @@ from dataclasses import dataclass
 
 import pytest
 
-from pycrew.settings import CrewSettings
+from runsmith.settings import CrewSettings
 
 
 def test_settings_use_dataclass_defaults_when_env_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("PYCREW_SUPERVISION_INTERVAL", raising=False)
-    monkeypatch.delenv("PYCREW_WORKER_RESTART_QUOTA", raising=False)
-    monkeypatch.delenv("PYCREW_SUPERVISOR_RESTART_QUOTA", raising=False)
+    monkeypatch.delenv("RUNSMITH_SUPERVISION_INTERVAL", raising=False)
+    monkeypatch.delenv("RUNSMITH_WORKER_RESTART_QUOTA", raising=False)
+    monkeypatch.delenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", raising=False)
 
     settings = CrewSettings()
 
@@ -22,9 +22,9 @@ def test_settings_use_dataclass_defaults_when_env_is_missing(
 
 
 def test_settings_read_values_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYCREW_SUPERVISION_INTERVAL", "0.25")
-    monkeypatch.setenv("PYCREW_WORKER_RESTART_QUOTA", "5")
-    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_QUOTA", "7")
+    monkeypatch.setenv("RUNSMITH_SUPERVISION_INTERVAL", "0.25")
+    monkeypatch.setenv("RUNSMITH_WORKER_RESTART_QUOTA", "5")
+    monkeypatch.setenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", "7")
 
     settings = CrewSettings()
 
@@ -36,9 +36,9 @@ def test_settings_read_values_from_environment(monkeypatch: pytest.MonkeyPatch) 
 def test_explicit_overrides_take_precedence_over_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("PYCREW_SUPERVISION_INTERVAL", "0.25")
-    monkeypatch.setenv("PYCREW_WORKER_RESTART_QUOTA", "5")
-    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_QUOTA", "7")
+    monkeypatch.setenv("RUNSMITH_SUPERVISION_INTERVAL", "0.25")
+    monkeypatch.setenv("RUNSMITH_WORKER_RESTART_QUOTA", "5")
+    monkeypatch.setenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", "7")
 
     settings = CrewSettings(
         supervision_interval=1.5,
@@ -58,8 +58,8 @@ class ExtendedCrewSettings(CrewSettings):
 
 
 def test_settings_coerce_bool_and_string_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYCREW_IS_ENABLED", "true")
-    monkeypatch.setenv("PYCREW_LABEL", "workers")
+    monkeypatch.setenv("RUNSMITH_IS_ENABLED", "true")
+    monkeypatch.setenv("RUNSMITH_LABEL", "workers")
 
     settings = ExtendedCrewSettings()
 
@@ -73,7 +73,7 @@ def test_settings_parse_boolean_literals(
     raw_value: str,
     expected: bool,
 ) -> None:
-    monkeypatch.setenv("PYCREW_IS_ENABLED", raw_value)
+    monkeypatch.setenv("RUNSMITH_IS_ENABLED", raw_value)
 
     settings = ExtendedCrewSettings()
 
@@ -81,7 +81,7 @@ def test_settings_parse_boolean_literals(
 
 
 def test_invalid_boolean_literal_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYCREW_IS_ENABLED", "maybe")
+    monkeypatch.setenv("RUNSMITH_IS_ENABLED", "maybe")
 
     with pytest.raises(ValueError, match="Cannot coerce 'maybe' to bool for setting 'is_enabled'"):
         ExtendedCrewSettings()

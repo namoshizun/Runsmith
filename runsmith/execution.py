@@ -7,8 +7,8 @@ from typing import Any, Protocol, TypeVar
 
 from loguru import logger
 
-from pycrew.core import EXIT_SIGNALS, IEvent, IQueue
-from pycrew.worker import (
+from runsmith.core import EXIT_SIGNALS, IEvent, IQueue
+from runsmith.worker import (
     AsyncWorker,
     AsyncWorkerLoop,
     SyncWorker,

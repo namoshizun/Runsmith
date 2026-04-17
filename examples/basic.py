@@ -1,5 +1,5 @@
 from examples.sleepy_worker import SleepyWorker
-from pycrew.supervisor import SyncSupervisor
+from runsmith.supervisor import SyncSupervisor
 
 if __name__ == "__main__":
     supervisor = SyncSupervisor("my-supervisor", "thread")

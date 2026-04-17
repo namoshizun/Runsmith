@@ -1,5 +1,5 @@
 from examples.sleepy_worker import SleepyWorker
-from pycrew.supervisor import SyncSupervisor
+from runsmith.supervisor import SyncSupervisor
 
 
 def root_thread_supervisor():

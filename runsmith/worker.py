@@ -20,10 +20,10 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from pycrew.core import ExecutorCommand, WorkerRunContext
-from pycrew.decorators import HOOK_ATTR
-from pycrew.defaults import DefaultWorkerFSM
-from pycrew.state import StateMachine
+from runsmith.core import ExecutorCommand, WorkerRunContext
+from runsmith.decorators import HOOK_ATTR
+from runsmith.defaults import DefaultWorkerFSM
+from runsmith.state import StateMachine
 
 _mono_now = time.monotonic
 

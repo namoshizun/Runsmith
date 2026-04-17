@@ -90,7 +90,7 @@ def _resolve_value(
 
 @dataclass(frozen=True, slots=True, init=False)
 class CrewSettings(Settings):
-    _env_prefix: ClassVar[str] = "PYCREW_"
+    _env_prefix: ClassVar[str] = "RUNSMITH_"
 
     supervision_interval: float = 0.25
     supervisor_restart_quota: int = 3

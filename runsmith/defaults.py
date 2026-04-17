@@ -2,8 +2,8 @@ from collections.abc import Iterable
 from types import EllipsisType
 from typing import Literal, TextIO
 
-from pycrew.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
-from pycrew.state import StateMachine, TransitionTable
+from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
+from runsmith.state import StateMachine, TransitionTable
 
 DefaultWorkerState = Literal["idle", "starting", "running", "terminating", "crashed", "stopped"]
 DefaultWorkerEvent = Literal["start", "run", "terminate", "complete", "error"]

@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 
-HOOK_ATTR = "_pycrew_hooks"
+HOOK_ATTR = "_runsmith_hooks"
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")

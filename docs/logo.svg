@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="110 350 970 300" width="100%" height="auto">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700&amp;display=swap');
+      .logo-text {
+        font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+        font-weight: 700;
+        font-size: 140px;
+        fill: #003882;
+        letter-spacing: -0.02em;
+      }
+    </style>
+    <mask id="hole-mask">
+      <rect x="130" y="350" width="900" height="300" fill="#FFFFFF"/>
+      <circle cx="309" cy="510" r="10" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Dark Blue Mark Elements (Paths and Nodes) -->
+  <g mask="url(#hole-mask)">
+    <!-- Connecting Paths -->
+    <path d="M 179 500 C 209 420, 249 400, 309 400" stroke="#003882" stroke-width="25" fill="none" stroke-linecap="round"/>
+    <path d="M 179 500 Q 244 515, 309 510" stroke="#003882" stroke-width="25" fill="none" stroke-linecap="round"/>
+    <path d="M 309 510 C 379 510, 379 600, 244 600" stroke="#003882" stroke-width="25" fill="none" stroke-linecap="round"/>
+    <path d="M 244 600 C 159 600, 139 530, 179 500" stroke="#003882" stroke-width="25" fill="none" stroke-linecap="round"/>
+    
+    <!-- Dark Blue Nodes -->
+    <circle cx="244" cy="600" r="42" fill="#003882"/>
+    <circle cx="309" cy="510" r="24" fill="#003882"/>
+  </g>
+
+  <!-- Colored Overlay Nodes -->
+  <circle cx="179" cy="500" r="42" fill="#00B8D4"/>
+  <circle cx="309" cy="400" r="42" fill="#FFB300"/>
+
+  <!-- Logo Text -->
+  <text x="404" y="536" class="logo-text">runsmith</text>
+</svg>

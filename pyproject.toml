@@ -1,7 +1,7 @@
 [project]
-name = "pycrew"
+name = "runsmith"
 version = "0.1.0"
-description = "PyCrew - A backend-agnostic framework for supervisor-worker architectures"
+description = "Runsmith - A supervisor-tree framework for building resilient systems"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -30,4 +30,4 @@ filterwarnings = [
     "ignore::UserWarning",
     "ignore::FutureWarning",
 ]
-addopts = "-v --cov=pycrew --cov-report=term"
+addopts = "-v --cov=runsmith --cov-report=term"

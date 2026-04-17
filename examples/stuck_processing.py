@@ -4,12 +4,12 @@ from typing import Literal
 
 from loguru import logger
 
-from pycrew.constraints import HeartbeatTimeout, StateTimeout, Timeout
-from pycrew.core import ExecutorCommand
-from pycrew.decorators import actor
-from pycrew.state import StateMachine, TransitionTable
-from pycrew.supervisor import SyncSupervisor
-from pycrew.worker import SyncWorker
+from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout
+from runsmith.core import ExecutorCommand
+from runsmith.decorators import actor
+from runsmith.state import StateMachine, TransitionTable
+from runsmith.supervisor import SyncSupervisor
+from runsmith.worker import SyncWorker
 
 WorkerState = Literal["idle", "warming", "processing", "cleanup", "crashed", "stopped"]
 WorkerEvent = Literal["preload", "start", "stop", "complete", "error"]

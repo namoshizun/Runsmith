@@ -4,8 +4,8 @@ from collections.abc import Iterable
 from types import EllipsisType
 from typing import Generic, Protocol, TypeVar
 
-from pycrew.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
-from pycrew.errors import InvalidStateMachineError, InvalidTransitionError
+from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
+from runsmith.errors import InvalidStateMachineError, InvalidTransitionError
 
 TState = TypeVar("TState", bound=str)
 TEvent = TypeVar("TEvent", bound=str)
@@ -116,7 +116,7 @@ class StateMachine(Generic[TState, TEvent]):
     @property
     def pretty_printer(self) -> IPrettyPrinter:
         if self._pretty_printer is None:
-            from pycrew.defaults import DefaultFSNPrettyPrinter
+            from runsmith.defaults import DefaultFSNPrettyPrinter
 
             self._pretty_printer = DefaultFSNPrettyPrinter(self, file=sys.stdout)
         return self._pretty_printer

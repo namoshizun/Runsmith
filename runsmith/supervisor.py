@@ -10,8 +10,8 @@ from typing import Callable, Generic, Literal, TypeVar, cast
 
 from loguru import logger
 
-from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
-from pycrew.errors import (
+from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
+from runsmith.errors import (
     IncompatibleExecutorTypeError,
     IncompatibleWorkerTypeError,
     NoWorkersRegisteredError,
@@ -22,19 +22,19 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from pycrew.core import EXIT_SIGNALS, ExecutorCommand, IQueue
-from pycrew.decorators import actor, post
-from pycrew.evaluator import WorkerStatusEvaluator
-from pycrew.execution import (
+from runsmith.core import EXIT_SIGNALS, ExecutorCommand, IQueue
+from runsmith.decorators import actor, post
+from runsmith.evaluator import WorkerStatusEvaluator
+from runsmith.execution import (
     CoroutineExecutor,
     IExecutor,
     ProcessExecutor,
     ThreadExecutor,
     drive_sync_worker,
 )
-from pycrew.settings import settings
-from pycrew.utils import Timer
-from pycrew.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
+from runsmith.settings import settings
+from runsmith.utils import Timer
+from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase)
 

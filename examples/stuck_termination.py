@@ -2,10 +2,10 @@ import time
 
 from loguru import logger
 
-from pycrew.decorators import actor
-from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
-from pycrew.supervisor import SyncSupervisor
-from pycrew.worker import ExecutorCommand, SyncWorker
+from runsmith.decorators import actor
+from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
+from runsmith.supervisor import SyncSupervisor
+from runsmith.worker import ExecutorCommand, SyncWorker
 
 
 class ReluctantWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):

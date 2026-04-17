@@ -2,9 +2,9 @@ import time
 
 from loguru import logger
 
-from pycrew.decorators import actor, post
-from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
-from pycrew.worker import ExecutorCommand, SyncWorker
+from runsmith.decorators import actor, post
+from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
+from runsmith.worker import ExecutorCommand, SyncWorker
 
 
 class SleepyWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):

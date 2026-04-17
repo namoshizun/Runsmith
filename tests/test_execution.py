@@ -4,8 +4,8 @@ import threading
 
 import pytest
 
-from pycrew.execution import drive_async_worker, drive_sync_worker
-from pycrew.worker import WorkerActivity
+from runsmith.execution import drive_async_worker, drive_sync_worker
+from runsmith.worker import WorkerActivity
 
 
 def _activity(kind: str) -> WorkerActivity:

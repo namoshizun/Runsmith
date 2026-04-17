@@ -2,9 +2,9 @@ import copy
 import dataclasses
 import math
 
-from pycrew.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
-from pycrew.state import StateMachine
-from pycrew.worker import WorkerActivity
+from runsmith.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
+from runsmith.state import StateMachine
+from runsmith.worker import WorkerActivity
 
 
 @dataclasses.dataclass(slots=True)
