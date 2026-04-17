@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import math
 
@@ -59,7 +60,7 @@ class WorkerStatusEvaluator:
 
     def __init__(self, fsm: StateMachine):
         self._expectation = Expectation(state=fsm.get_initial_state())
-        self._constraints = WorkerConstraints.from_fsm(fsm)
+        self._constraints = WorkerConstraints.from_fsm(copy.deepcopy(fsm))
 
     def record(self, activity: WorkerActivity):
         exp = self._expectation

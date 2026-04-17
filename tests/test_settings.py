@@ -11,44 +11,44 @@ def test_settings_use_dataclass_defaults_when_env_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PYCREW_SUPERVISION_INTERVAL", raising=False)
-    monkeypatch.delenv("PYCREW_WORKER_RESTART_COUNT", raising=False)
-    monkeypatch.delenv("PYCREW_SUPERVISOR_RESTART_COUNT", raising=False)
-
-    settings = CrewSettings()
-
-    assert settings.supervision_interval == 0.1
-    assert settings.worker_restart_count == 3
-    assert settings.supervisor_restart_count == 3
-
-
-def test_settings_read_values_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYCREW_SUPERVISION_INTERVAL", "0.25")
-    monkeypatch.setenv("PYCREW_WORKER_RESTART_COUNT", "5")
-    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_COUNT", "7")
+    monkeypatch.delenv("PYCREW_WORKER_RESTART_QUOTA", raising=False)
+    monkeypatch.delenv("PYCREW_SUPERVISOR_RESTART_QUOTA", raising=False)
 
     settings = CrewSettings()
 
     assert settings.supervision_interval == 0.25
-    assert settings.worker_restart_count == 5
-    assert settings.supervisor_restart_count == 7
+    assert settings.worker_restart_quota == 3
+    assert settings.supervisor_restart_quota == 3
+
+
+def test_settings_read_values_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PYCREW_SUPERVISION_INTERVAL", "0.25")
+    monkeypatch.setenv("PYCREW_WORKER_RESTART_QUOTA", "5")
+    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_QUOTA", "7")
+
+    settings = CrewSettings()
+
+    assert settings.supervision_interval == 0.25
+    assert settings.worker_restart_quota == 5
+    assert settings.supervisor_restart_quota == 7
 
 
 def test_explicit_overrides_take_precedence_over_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYCREW_SUPERVISION_INTERVAL", "0.25")
-    monkeypatch.setenv("PYCREW_WORKER_RESTART_COUNT", "5")
-    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_COUNT", "7")
+    monkeypatch.setenv("PYCREW_WORKER_RESTART_QUOTA", "5")
+    monkeypatch.setenv("PYCREW_SUPERVISOR_RESTART_QUOTA", "7")
 
     settings = CrewSettings(
         supervision_interval=1.5,
-        worker_restart_count=9,
-        supervisor_restart_count=11,
+        worker_restart_quota=9,
+        supervisor_restart_quota=11,
     )
 
     assert settings.supervision_interval == 1.5
-    assert settings.worker_restart_count == 9
-    assert settings.supervisor_restart_count == 11
+    assert settings.worker_restart_quota == 9
+    assert settings.supervisor_restart_quota == 11
 
 
 @dataclass(frozen=True, slots=True, init=False)

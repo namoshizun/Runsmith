@@ -92,6 +92,10 @@ def _resolve_value(
 class CrewSettings(Settings):
     _env_prefix: ClassVar[str] = "PYCREW_"
 
-    supervision_interval: float = 0.1
-    worker_restart_count: int = 3
-    supervisor_restart_count: int = 3
+    supervision_interval: float = 0.25
+    supervisor_restart_quota: int = 3
+    worker_restart_quota: int = 3
+    activity_queue_maxsize: int = 100
+
+
+settings = CrewSettings()

@@ -9,9 +9,9 @@ DefaultWorkerState = Literal["idle", "starting", "running", "terminating", "cras
 DefaultWorkerEvent = Literal["start", "run", "terminate", "complete", "error"]
 
 
-DefaultWorkerTransitionTable: TransitionTable[DefaultWorkerState, DefaultWorkerEvent] = {
+DefaultTransitionTable: TransitionTable[DefaultWorkerState, DefaultWorkerEvent] = {
     "idle": {"start": "starting"},
-    "starting": {"run": "running"},
+    "starting": {"run": "running", "error": "crashed"},
     "running": {"terminate": "terminating", "error": "crashed"},
     "terminating": {"complete": "stopped", "error": "crashed"},
     "crashed": ...,
@@ -33,7 +33,7 @@ DefaultWorkerConstraints: Iterable[Timeout] = [
 
 
 DefaultWorkerFSM = StateMachine[DefaultWorkerState, DefaultWorkerEvent](
-    transitions=DefaultWorkerTransitionTable,
+    transitions=DefaultTransitionTable,
     initial_event="start",
     constraints=DefaultWorkerConstraints,
 )

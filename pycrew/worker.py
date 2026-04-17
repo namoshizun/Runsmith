@@ -161,6 +161,7 @@ class SyncWorker(WorkerBase[TState, TEvent]):
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
+                logger.info(f"State transition [{self.name}]: {src} -[{event}] -> {tgt}")
                 cmd = yield MakeActivity(kind="transition_begin", transition=transition)
 
                 # Invoke state transition hooks: src -> [post] -> [pre] -> tgt

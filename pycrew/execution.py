@@ -3,14 +3,11 @@ import multiprocessing
 import signal
 import threading
 from collections.abc import AsyncGenerator, Generator
-from multiprocessing.queues import Queue as MPQueue
-from multiprocessing.synchronize import Event as MPEvent
-from queue import Queue
 from typing import Any, Protocol, TypeVar
 
 from loguru import logger
 
-from pycrew.core import EXIT_SIGNALS, IEnqueue, IEvent
+from pycrew.core import EXIT_SIGNALS, IEvent, IQueue
 from pycrew.worker import (
     AsyncWorker,
     AsyncWorkerLoop,
@@ -29,7 +26,7 @@ class IExecutor(Protocol[WorkerT]):
     @property
     def name(self) -> str: ...
     @property
-    def activity_queue(self) -> IEnqueue[WorkerActivity]: ...
+    def activity_queue(self) -> IQueue[WorkerActivity]: ...
     @property
     def term_event(self) -> IEvent: ...
 
@@ -81,8 +78,8 @@ class ThreadExecutor(threading.Thread):
     def __init__(
         self,
         worker: SyncWorker,
-        term_event: threading.Event,
-        activity_queue: Queue[WorkerActivity] | MPQueue,
+        term_event: IEvent,
+        activity_queue: IQueue[WorkerActivity],
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -107,8 +104,8 @@ class ProcessExecutor(multiprocessing.Process):
     def __init__(
         self,
         worker: SyncWorker,
-        term_event: MPEvent,
-        activity_queue: MPQueue,
+        term_event: IEvent,
+        activity_queue: IQueue[WorkerActivity],
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -135,8 +132,8 @@ class CoroutineExecutor:
     def __init__(
         self,
         worker: AsyncWorker,
-        term_event: asyncio.Event,
-        activity_queue: asyncio.Queue[WorkerActivity],
+        term_event: IEvent,
+        activity_queue: IQueue[WorkerActivity],
     ):
         self.worker = worker
         self.name = worker.name

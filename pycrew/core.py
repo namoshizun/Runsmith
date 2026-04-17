@@ -17,11 +17,16 @@ class IEvent(Protocol):
     def is_set(self) -> bool: ...
 
 
-EnqueueItem = TypeVar("EnqueueItem", contravariant=True)
+class IQueue(Protocol, Generic[T]):
+    """Structural type for queue-like objects used across threads or processes.
 
+    ``put_nowait`` / ``get_nowait`` are positional-only so implementations match
+    whether typeshed names the value parameter ``item`` (``queue.Queue``) or
+    ``obj`` (``multiprocessing.queues.Queue``).
+    """
 
-class IEnqueue(Protocol, Generic[EnqueueItem]):
-    def put_nowait(self, item: EnqueueItem) -> None: ...
+    def put_nowait(self, item: T, /) -> None: ...
+    def get_nowait(self, /) -> T: ...
 
 
 @dataclasses.dataclass(slots=True)
