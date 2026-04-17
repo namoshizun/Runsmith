@@ -39,39 +39,43 @@ class IExecutor(Protocol[WorkerT]):
 def drive_sync_worker(
     execution: SyncWorkerLoop, term_event: IEvent
 ) -> Generator[WorkerActivity, None, None]:
-    stop_sent = False
     yield next(execution)
 
-    while True:
-        if term_event.is_set() and not stop_sent:
-            cmd = "stop"
-            stop_sent = True
-        else:
-            cmd = "tick"
-
-        try:
-            yield execution.send(cmd)
-        except StopIteration:
-            return
+    try:
+        # Phase 1: Executing activities
+        while not term_event.is_set():
+            yield execution.send("tick")
+        # Phase 2: Stop-and-handshake
+        activity = execution.send("stop")
+        while activity.kind != "transition_begin":
+            activity = execution.send("stop")
+        yield activity
+        # Phase 3: Termination activities
+        while True:
+            yield execution.send("tick")
+    except StopIteration:
+        return
 
 
 async def drive_async_worker(
     execution: AsyncWorkerLoop, term_event: IEvent
 ) -> AsyncGenerator[WorkerActivity, None]:
-    stop_sent = False
     yield await execution.asend(None)
 
-    while True:
-        if term_event.is_set() and not stop_sent:
-            cmd = "stop"
-            stop_sent = True
-        else:
-            cmd = "tick"
-
-        try:
-            yield await execution.asend(cmd)
-        except StopIteration:
-            return
+    try:
+        # Phase 1: Executing activities
+        while not term_event.is_set():
+            yield await execution.asend("tick")
+        # Phase 2: Stop-and-handshake
+        activity = await execution.asend("stop")
+        while activity.kind != "transition_begin":
+            activity = await execution.asend("stop")
+        yield activity
+        # Phase 3: Termination activities
+        while True:
+            yield await execution.asend("tick")
+    except StopAsyncIteration:
+        return
 
 
 class ThreadExecutor(threading.Thread):

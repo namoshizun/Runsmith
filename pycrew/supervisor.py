@@ -23,7 +23,7 @@ else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
 from pycrew.core import EXIT_SIGNALS, ExecutorCommand, IQueue
-from pycrew.decorators import actor
+from pycrew.decorators import actor, post
 from pycrew.evaluator import WorkerStatusEvaluator
 from pycrew.execution import IExecutor, ProcessExecutor, ThreadExecutor, drive_sync_worker
 from pycrew.settings import settings
@@ -236,9 +236,13 @@ class SyncSupervisor(
         # Forcefully terminate workers that linger for too long
         self.drain_activity_queue()
         now = time.monotonic()
-        for unit in self.units.values():
+        for name, unit in self.units.items():
             if unit.executor.is_alive() and not unit.evaluator.is_healthy(now):
+                logger.info(f"Killing lingering unhealthy worker [{name}]")
                 unit.executor.kill()
 
-        logger.info(f"Supervisor [{self.name}] is shutting down... Units count: {len(self.units)}")
         return self.emit("keepalive")
+
+    @post("terminating", "complete")
+    def _on_termination(self):
+        logger.info(f"Supervisor [{self.name}] is shutting down... Units count: {len(self.units)}")
