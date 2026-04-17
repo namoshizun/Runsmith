@@ -22,13 +22,13 @@ else:
 
 from pycrew.core import ExecutorCommand, WorkerRunContext
 from pycrew.decorators import HOOK_ATTR
-from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerFSM, DefaultWorkerState
+from pycrew.defaults import DefaultWorkerFSM
 from pycrew.state import StateMachine
 
 _mono_now = time.monotonic
 
-TEvent = TypeVar("TEvent", bound=str, default=DefaultWorkerEvent)
-TState = TypeVar("TState", bound=str, default=DefaultWorkerState)
+TEvent = TypeVar("TEvent", bound=str)
+TState = TypeVar("TState", bound=str)
 
 
 @dataclasses.dataclass(slots=True)

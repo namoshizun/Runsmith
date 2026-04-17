@@ -3,10 +3,11 @@ import time
 from loguru import logger
 
 from pycrew.decorators import actor, post
+from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
 from pycrew.worker import ExecutorCommand, SyncWorker
 
 
-class SleepyWorker(SyncWorker):
+class SleepyWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @post("running", "error")
     @post("terminating", "error")
     def on_error(self):

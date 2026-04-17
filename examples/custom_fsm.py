@@ -23,15 +23,17 @@ WorkerTransitionTable: TransitionTable[WorkerState, WorkerEvent] = {
     "stopped": ...,
 }
 
+HEARTBEAT_TIMEOUT = 2
+
 WorkerConstraints: list[Timeout] = [
-    HeartbeatTimeout(timeout=2, when="processing"),
+    HeartbeatTimeout(timeout=HEARTBEAT_TIMEOUT, when="processing"),
     StateTimeout(timeout=10, when="cleanup"),
 ]
 
 
 WorkerFSM = StateMachine[WorkerState, WorkerEvent](
     transitions=WorkerTransitionTable,
-    initial_event="start",
+    initial_event="preload",
     constraints=WorkerConstraints,
 )
 
@@ -51,18 +53,18 @@ class MyAlgorithmExecutor(SyncWorker[WorkerState, WorkerEvent]):
         if cmd == "stop":
             return self.emit("stop")
 
-        time.sleep(1)
-        logger.info("Zzzzz...")
-
         if next(count) > 3:
-            logger.info("Gonna sleep for a long time. Supervisor should think I am dead")
-            time.sleep(3)
+            logger.info("Gonna sleep for a long time. Supervisor will think I am dead")
+            time.sleep(HEARTBEAT_TIMEOUT + 1)
+        else:
+            time.sleep(1)
+            logger.info("Zzzzz...")
 
         return self.emit("keepalive")
 
 
 if __name__ == "__main__":
-    supervisor = SyncSupervisor("my-supervisor", "thread")
+    supervisor = SyncSupervisor("my-supervisor", "process")
     supervisor.register_workers(
         MyAlgorithmExecutor("foo", fsm=WorkerFSM),
         MyAlgorithmExecutor("bar", fsm=WorkerFSM),

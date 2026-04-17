@@ -10,6 +10,7 @@ from typing import Callable, Generic, Literal, TypeVar
 
 from loguru import logger
 
+from pycrew.defaults import DefaultWorkerEvent, DefaultWorkerState
 from pycrew.errors import (
     IncompatibleExecutorTypeError,
     IncompatibleWorkerTypeError,
@@ -89,7 +90,9 @@ class SupervisorBase(Generic[WorkerT]):
                 logger.warning(f"Received activity from unknown worker: {activity}")
 
 
-class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker):
+class SyncSupervisor(
+    SupervisorBase[SyncWorker], SyncWorker[DefaultWorkerState, DefaultWorkerEvent]
+):
     def __init__(self, name: str, executor_type: Literal["thread", "process"]):
         if executor_type not in ["thread", "process"]:
             raise IncompatibleExecutorTypeError(
@@ -186,14 +189,18 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker):
                     continue
 
                 if not unit.retryable():
-                    logger.warning(
+                    logger.critical(
                         f"Worker [{name}] has been restarted {unit.restart_count} times. "
                         "Going to give it up and terminate the entire session"
                     )
                     return self.emit("terminate")
 
                 # Destroy the original unit
-                restart_count = unit.restart_count
+                restart_count = unit.restart_count + 1
+                logger.warning(
+                    f"Restarting unhealthy worker [{name}] for the {restart_count}th time..."
+                )
+
                 if unit.executor.is_alive():
                     unit.executor.kill()
 
@@ -203,7 +210,7 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker):
                 self.register_workers(unit.worker.clone())
 
                 unit = self.units[name]
-                unit.restart_count = restart_count + 1
+                unit.restart_count = restart_count
                 unit.executor.start()
 
         elapsed = timer.elapsed()
@@ -233,4 +240,5 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker):
             if unit.executor.is_alive() and not unit.evaluator.is_healthy(now):
                 unit.executor.kill()
 
+        logger.info(f"Supervisor [{self.name}] is shutting down... Units count: {len(self.units)}")
         return self.emit("keepalive")
