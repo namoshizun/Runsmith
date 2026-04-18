@@ -17,3 +17,7 @@ class InvalidTransitionError(ValueError):
 
 class NoWorkersRegisteredError(ValueError):
     pass
+
+
+class InvalidHookFunctionTypeError(TypeError):
+    pass

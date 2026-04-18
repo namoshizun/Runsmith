@@ -8,6 +8,10 @@ _mono_now = time.monotonic
 
 EXIT_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT)
 
+ExecutorCommand = Literal["tick", "stop"] | None
+
+SyncTransitionEffectHook = Callable[[Any], None]
+
 
 T = TypeVar("T")
 
@@ -31,6 +35,7 @@ class IQueue(Protocol, Generic[T]):
 
 @dataclasses.dataclass(slots=True)
 class WorkerRunContext:
+    cmd: ExecutorCommand = "tick"
     history: deque[tuple[str, str]] = dataclasses.field(
         default_factory=lambda: deque(maxlen=100),
         metadata={"help": "History of state transitions defined as (event, state)"},
@@ -52,8 +57,3 @@ class WorkerRunContext:
 
     def set_data(self, data: Any):
         self.data = data
-
-
-ExecutorCommand = Literal["tick", "stop"] | None
-
-SyncTransitionEffectHook = Callable[[Any], None]

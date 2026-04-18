@@ -4,9 +4,10 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from queue import Empty, Queue
-from typing import Callable, Generic, Literal, TypeVar, cast
+from typing import Any, Callable, Generic, Literal, TypeVar, cast
 
 from loguru import logger
 
@@ -22,7 +23,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from runsmith.core import EXIT_SIGNALS, ExecutorCommand, IQueue
+from runsmith.core import EXIT_SIGNALS, IQueue
 from runsmith.decorators import actor, post
 from runsmith.evaluator import WorkerStatusEvaluator
 from runsmith.execution import (
@@ -30,6 +31,7 @@ from runsmith.execution import (
     IExecutor,
     ProcessExecutor,
     ThreadExecutor,
+    drive_async_worker,
     drive_sync_worker,
 )
 from runsmith.settings import settings
@@ -38,9 +40,14 @@ from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase)
 
-OnActivityCallback = Callable[[WorkerActivity], None]
+SyncOnActivityCallback = Callable[[WorkerActivity], None]
+AsyncOnActivityCallback = Callable[[WorkerActivity], Coroutine[Any, Any, None]]
 
 noop = lambda *_: None
+
+
+async def anoop(_: WorkerActivity) -> None:
+    return None
 
 
 @dataclass
@@ -107,6 +114,24 @@ class SupervisorBase(Generic[WorkerT]):
                 else settings.worker_restart_quota,
             )
 
+    def restart_unit(self, name: str) -> SupervisionUnit[WorkerT]:
+        # Destroy the original unit
+        unit = self.units[name]
+        restart_count = unit.restart_count + 1
+        logger.warning(f"Restarting unhealthy worker [{name}] for the {restart_count}th time...")
+
+        if unit.executor.is_alive():
+            unit.executor.kill()
+
+        del self.units[name]
+
+        # Replace it with the new unit
+        self.materialize_units(worker_name=name)
+        unit = self.units[name]
+        unit.restart_count = restart_count
+        unit.executor.start()
+        return unit
+
     def start_executors(self):
         if not self.units:
             raise NoWorkersRegisteredError("No workers registered")
@@ -128,7 +153,7 @@ class SupervisorBase(Generic[WorkerT]):
         while True:
             try:
                 activity = self.activity_queue.get_nowait()
-            except Empty:
+            except (Empty, asyncio.QueueEmpty):
                 return
 
             if unit := self.units.get(activity.worker_name):
@@ -166,7 +191,7 @@ class SyncSupervisor(
         for worker in workers:
             self._worker_templates[worker.name] = worker
 
-    def run(self, on_activity: OnActivityCallback = noop):
+    def run(self, on_activity: SyncOnActivityCallback = noop):
         # The root supervisor's entry point
         term_event = threading.Event()
 
@@ -186,9 +211,13 @@ class SyncSupervisor(
         try:
             # Initialize the activity queue
             if self.executor_type == "thread":
-                self._activity_queue = Queue[WorkerActivity](maxsize=settings.activity_queue_maxsize)
+                self._activity_queue = Queue[WorkerActivity](
+                    maxsize=settings.activity_queue_maxsize
+                )
             else:
-                self._activity_queue = multiprocessing.Queue(maxsize=settings.activity_queue_maxsize)
+                self._activity_queue = multiprocessing.Queue(
+                    maxsize=settings.activity_queue_maxsize
+                )
 
             # Materialize and start all the units
             self.materialize_units()
@@ -204,8 +233,8 @@ class SyncSupervisor(
             return self.emit("error")
 
     @actor("running")
-    def _supervise(self, *, cmd: ExecutorCommand):
-        if cmd == "stop":
+    def _supervise(self):
+        if self.ctx.cmd == "stop":
             return self.emit("terminate")
 
         with Timer("s") as timer:
@@ -223,22 +252,7 @@ class SyncSupervisor(
                     )
                     return self.emit("terminate")
 
-                # Destroy the original unit
-                restart_count = unit.restart_count + 1
-                logger.warning(
-                    f"Restarting unhealthy worker [{name}] for the {restart_count}th time..."
-                )
-
-                if unit.executor.is_alive():
-                    unit.executor.kill()
-
-                del self.units[name]
-
-                # Replace it with the new unit
-                self.materialize_units(worker_name=name)
-                unit = self.units[name]
-                unit.restart_count = restart_count
-                unit.executor.start()
+                self.restart_unit(name)
 
         elapsed = timer.elapsed()
         if (sleep_for := (settings.supervision_interval - elapsed)) > 0.025:
@@ -266,4 +280,115 @@ class SyncSupervisor(
 
     @post("terminating", "complete")
     def _on_termination(self):
+        logger.info(f"Supervisor [{self.name}] is shutting down... Units count: {len(self.units)}")
+
+
+class AsyncSupervisor(
+    SupervisorBase[AsyncWorker], AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]
+):
+    def __init__(self, name: str):
+        SupervisorBase.__init__(self, executor_type="coroutine")
+        AsyncWorker.__init__(self, name=name)
+
+    def clone(self) -> Self:
+        instance = self.__class__(name=self.name)
+        workers: list[AsyncWorker] = [w.clone() for w in self._worker_templates.values()]
+        instance.register_workers(*workers)
+        return instance
+
+    def register_workers(self, *workers: AsyncWorker):
+        all_async_workers = workers and all(isinstance(w, AsyncWorker) for w in workers)
+        if not all_async_workers:
+            raise IncompatibleWorkerTypeError(
+                "AsyncSupervisor can only supervise instances of AsyncWorkers"
+            )
+
+        for worker in workers:
+            self._worker_templates[worker.name] = worker
+
+    async def run(self, on_activity: AsyncOnActivityCallback = anoop):
+        # The root supervisor's entry point
+        term_event = asyncio.Event()
+
+        for sig in EXIT_SIGNALS:
+            signal.signal(sig, lambda *_: term_event.set())
+
+        async for activity in drive_async_worker(self.main_loop(), term_event):
+            asyncio.create_task(on_activity(activity))
+
+    def before_exit(self, is_graceful: bool):
+        if not is_graceful:
+            self.kill_executors()
+
+    # ── FSM actors ──────────────────────────────────────────────
+    @actor("starting")
+    async def _boot(self):
+        try:
+            # Initialize the activity queue
+            self._activity_queue = asyncio.Queue[WorkerActivity](
+                maxsize=settings.activity_queue_maxsize
+            )
+
+            # Materialize and start all the units
+            self.materialize_units()
+            self.start_executors()
+            logger.opt(colors=True).info(
+                f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
+            )
+            return self.emit("run")
+        except NoWorkersRegisteredError:
+            logger.critical(
+                f"Supervisor [{self.name}] failed to start due to no workers registered!!"
+            )
+            return self.emit("error")
+
+    @actor("running")
+    async def _supervise(self):
+        if self.ctx.cmd == "stop":
+            return self.emit("terminate")
+
+        with Timer("s") as timer:
+            self.drain_activity_queue()
+            now = time.monotonic()
+            for name in tuple(self.units.keys()):
+                unit = self.units[name]
+                if unit.evaluator.is_healthy(now):
+                    continue
+
+                if not unit.retryable():
+                    logger.critical(
+                        f"Worker [{name}] has been restarted {unit.restart_count} times. "
+                        "Going to give it up and terminate the entire session"
+                    )
+                    return self.emit("terminate")
+
+                self.restart_unit(name)
+
+        elapsed = timer.elapsed()
+
+        if (sleep_for := (settings.supervision_interval - elapsed)) > 0.025:
+            await asyncio.sleep(sleep_for)
+
+        return self.emit("keepalive")
+
+    @actor("terminating")
+    async def _shutdown(self):
+        if all(not unit.executor.is_alive() for unit in self.units.values()):
+            return self.emit("complete")
+
+        self.stop_executors()
+        await asyncio.sleep(2 * settings.supervision_interval)
+
+        # Forcefully terminate workers that linger for too long
+        self.drain_activity_queue()
+        now = time.monotonic()
+        for name, unit in self.units.items():
+            if unit.executor.is_alive() and not unit.evaluator.is_healthy(now):
+                logger.info(f"Killing lingering unhealthy worker [{name}]")
+                unit.executor.kill()
+
+        return self.emit("keepalive")
+
+    @post("terminating", "complete")
+    async def _on_termination(self):
         logger.info(f"Supervisor [{self.name}] is shutting down... Units count: {len(self.units)}")

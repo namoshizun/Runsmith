@@ -5,7 +5,7 @@ from loguru import logger
 from runsmith.decorators import actor
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
 from runsmith.supervisor import SyncSupervisor
-from runsmith.worker import ExecutorCommand, SyncWorker
+from runsmith.worker import SyncWorker
 
 
 class ReluctantWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
@@ -15,7 +15,7 @@ class ReluctantWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
         return self.emit("run")
 
     @actor("running")
-    def sleepy(self, *, cmd: ExecutorCommand):
+    def sleepy(self):
         # Not responding to `stop` command at all...
         time.sleep(1)
         logger.info(f"[{self.name}] Zzzzz...")

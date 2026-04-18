@@ -1,16 +1,7 @@
 import time
-from collections.abc import Iterable
-from typing import Literal, TypeVar
+from typing import Literal
 
 from loguru import logger
-
-T = TypeVar("T")
-
-
-def ensure_list(obj: T | Iterable[T]) -> Iterable[T]:
-    if isinstance(obj, Iterable):
-        return obj
-    return [obj]
 
 
 class Timer:

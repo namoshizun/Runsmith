@@ -5,7 +5,6 @@ from typing import Literal
 from loguru import logger
 
 from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout
-from runsmith.core import ExecutorCommand
 from runsmith.decorators import actor
 from runsmith.state import StateMachine, TransitionTable
 from runsmith.supervisor import SyncSupervisor
@@ -49,8 +48,8 @@ class MyAlgorithmExecutor(SyncWorker[WorkerState, WorkerEvent]):
         return self.emit("start")
 
     @actor("processing")
-    def process(self, *, cmd: ExecutorCommand):
-        if cmd == "stop":
+    def process(self):
+        if self.ctx.cmd == "stop":
             return self.emit("stop")
 
         if next(count) > 3:

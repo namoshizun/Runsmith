@@ -4,10 +4,10 @@ from loguru import logger
 
 from runsmith.decorators import actor, post
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
-from runsmith.worker import ExecutorCommand, SyncWorker
+from runsmith.worker import SyncWorker
 
 
-class SleepyWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @post("running", "error")
     @post("terminating", "error")
     def on_error(self):
@@ -22,8 +22,8 @@ class SleepyWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
         return self.emit("run")
 
     @actor("running")
-    def sleepy(self, *, cmd: ExecutorCommand):
-        if cmd == "stop":
+    def sleepy(self):
+        if self.ctx.cmd == "stop":
             return self.emit("terminate")
 
         time.sleep(1)
