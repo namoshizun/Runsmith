@@ -96,6 +96,7 @@ class RunsmithSettings(Settings):
     supervisor_restart_quota: int = 3
     worker_restart_quota: int = 3
     activity_queue_maxsize: int = 100
+    activity_callback_task_queue_size: int = 16
 
 
 settings = RunsmithSettings()

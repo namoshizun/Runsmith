@@ -135,7 +135,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
                 return lambda: event
             return async_inner
 
-        if state is self.fsm.get_initial_state():
+        if state == self.fsm.get_initial_state():
             return make_single_event_actor(self.fsm.get_initial_event())
 
         try:

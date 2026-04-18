@@ -35,7 +35,7 @@ from runsmith.execution import (
     drive_sync_worker,
 )
 from runsmith.settings import settings
-from runsmith.utils import Timer
+from runsmith.utils import CoroutineQueue, Timer
 from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity, WorkerBase
 
 WorkerT = TypeVar("WorkerT", bound=WorkerBase)
@@ -242,7 +242,7 @@ class SyncSupervisor(
             now = time.monotonic()
             for name in tuple(self.units.keys()):
                 unit = self.units[name]
-                if unit.evaluator.is_healthy(now):
+                if unit.evaluator.is_healthy(now) and unit.executor.is_alive():
                     continue
 
                 if not unit.retryable():
@@ -309,12 +309,21 @@ class AsyncSupervisor(
     async def run(self, on_activity: AsyncOnActivityCallback = anoop):
         # The root supervisor's entry point
         term_event = asyncio.Event()
+        callbacks = CoroutineQueue(max_pending=settings.activity_callback_task_queue_size)
 
         for sig in EXIT_SIGNALS:
             signal.signal(sig, lambda *_: term_event.set())
 
         async for activity in drive_async_worker(self.main_loop(), term_event):
-            asyncio.create_task(on_activity(activity))
+            callbacks.flush_errors()
+            overflowed = callbacks.submit(on_activity(activity))
+            if overflowed:
+                logger.warning(
+                    f"Callback backlog saturated in supervisor [{self.name}], dropped oldest callback task"
+                )
+
+        await callbacks.drain()
+        callbacks.flush_errors()
 
     def before_exit(self, is_graceful: bool):
         if not is_graceful:
