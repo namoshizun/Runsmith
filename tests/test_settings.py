@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from runsmith.settings import CrewSettings
+from runsmith.settings import RunsmithSettings
 
 
 def test_settings_use_dataclass_defaults_when_env_is_missing(
@@ -14,7 +14,7 @@ def test_settings_use_dataclass_defaults_when_env_is_missing(
     monkeypatch.delenv("RUNSMITH_WORKER_RESTART_QUOTA", raising=False)
     monkeypatch.delenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", raising=False)
 
-    settings = CrewSettings()
+    settings = RunsmithSettings()
 
     assert settings.supervision_interval == 0.25
     assert settings.worker_restart_quota == 3
@@ -26,7 +26,7 @@ def test_settings_read_values_from_environment(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("RUNSMITH_WORKER_RESTART_QUOTA", "5")
     monkeypatch.setenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", "7")
 
-    settings = CrewSettings()
+    settings = RunsmithSettings()
 
     assert settings.supervision_interval == 0.25
     assert settings.worker_restart_quota == 5
@@ -40,7 +40,7 @@ def test_explicit_overrides_take_precedence_over_environment(
     monkeypatch.setenv("RUNSMITH_WORKER_RESTART_QUOTA", "5")
     monkeypatch.setenv("RUNSMITH_SUPERVISOR_RESTART_QUOTA", "7")
 
-    settings = CrewSettings(
+    settings = RunsmithSettings(
         supervision_interval=1.5,
         worker_restart_quota=9,
         supervisor_restart_quota=11,
@@ -52,7 +52,7 @@ def test_explicit_overrides_take_precedence_over_environment(
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class ExtendedCrewSettings(CrewSettings):
+class ExtendedRunsmithSettings(RunsmithSettings):
     is_enabled: bool = False
     label: str = "default"
 
@@ -61,7 +61,7 @@ def test_settings_coerce_bool_and_string_fields(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("RUNSMITH_IS_ENABLED", "true")
     monkeypatch.setenv("RUNSMITH_LABEL", "workers")
 
-    settings = ExtendedCrewSettings()
+    settings = ExtendedRunsmithSettings()
 
     assert settings.is_enabled is True
     assert settings.label == "workers"
@@ -75,7 +75,7 @@ def test_settings_parse_boolean_literals(
 ) -> None:
     monkeypatch.setenv("RUNSMITH_IS_ENABLED", raw_value)
 
-    settings = ExtendedCrewSettings()
+    settings = ExtendedRunsmithSettings()
 
     assert settings.is_enabled is expected
 
@@ -84,16 +84,16 @@ def test_invalid_boolean_literal_raises_value_error(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("RUNSMITH_IS_ENABLED", "maybe")
 
     with pytest.raises(ValueError, match="Cannot coerce 'maybe' to bool for setting 'is_enabled'"):
-        ExtendedCrewSettings()
+        ExtendedRunsmithSettings()
 
 
 def test_unknown_override_raises_type_error() -> None:
     with pytest.raises(TypeError, match="Unknown settings: mystery"):
-        CrewSettings(mystery=1)
+        RunsmithSettings(mystery=1)
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class UnsupportedSettings(CrewSettings):
+class UnsupportedSettings(RunsmithSettings):
     tags: tuple[str, ...] = ()
 
 

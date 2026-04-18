@@ -89,7 +89,7 @@ def _resolve_value(
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class CrewSettings(Settings):
+class RunsmithSettings(Settings):
     _env_prefix: ClassVar[str] = "RUNSMITH_"
 
     supervision_interval: float = 0.25
@@ -98,4 +98,4 @@ class CrewSettings(Settings):
     activity_queue_maxsize: int = 100
 
 
-settings = CrewSettings()
+settings = RunsmithSettings()

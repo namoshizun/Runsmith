@@ -118,7 +118,6 @@ class ProcessExecutor(multiprocessing.Process):
         self.worker = worker
         self.term_event = term_event
         self.activity_queue = activity_queue
-        self.__health_proxy = multiprocessing.Value("B", 0)
 
     def run(self):
         # Ignore exit signals, the supervisor process should take care of handling them

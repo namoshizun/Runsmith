@@ -186,9 +186,9 @@ class SyncSupervisor(
         try:
             # Initialize the activity queue
             if self.executor_type == "thread":
-                self._activity_queue = Queue[WorkerActivity]()
+                self._activity_queue = Queue[WorkerActivity](maxsize=settings.activity_queue_maxsize)
             else:
-                self._activity_queue = multiprocessing.Queue()
+                self._activity_queue = multiprocessing.Queue(maxsize=settings.activity_queue_maxsize)
 
             # Materialize and start all the units
             self.materialize_units()
