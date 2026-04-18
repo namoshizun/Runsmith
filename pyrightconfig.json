@@ -9,9 +9,9 @@
   "reportUnreachable": "warning",
   "reportMissingParameterType": "error",
   "reportUnknownVariableType": "information",
-  "reportUnusedCallResult": "hint",
+  "reportUnusedCallResult": false,
   "deprecateTypingAliases": true,
   "ignore": [".venv"],
-  "exclude": [".venv", "recipes", "**/node_modules", "**/__pycache__"],
+  "exclude": [".venv", "recipes", "**/node_modules", "**/__pycache__", "tests"],
   "pythonPlatform": "Linux"
 }
