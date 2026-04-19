@@ -24,6 +24,10 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.9",
 ]
+examples = [
+    "fastapi[standard]>=0.136.0",
+]
+
 
 [tool.pytest.ini_options]
 filterwarnings = [

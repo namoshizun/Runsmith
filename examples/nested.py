@@ -1,4 +1,4 @@
-from examples.sync_worker import SleepySyncWorker
+from examples.sleepy_worker import SleepySyncWorker
 from runsmith.supervisor import SyncSupervisor
 
 
