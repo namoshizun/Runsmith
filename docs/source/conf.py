@@ -31,6 +31,8 @@ autosummary_generate = True
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
 
+myst_enable_extensions = ["colon_fence"]
+
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }

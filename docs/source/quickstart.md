@@ -13,7 +13,8 @@ import time
 from loguru import logger
 from runsmith.decorators import actor, post
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
-from runsmith.supervisor import SyncSupervisor, SyncWorker
+from runsmith.supervisor import SyncSupervisor
+from runsmith.worker import SyncWorker
 
 
 class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
@@ -68,7 +69,8 @@ import asyncio
 from loguru import logger
 from runsmith.decorators import actor, post
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
-from runsmith.supervisor import AsyncSupervisor, AsyncWorker
+from runsmith.supervisor import AsyncSupervisor
+from runsmith.worker import AsyncWorker
 
 
 class SleepyAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):

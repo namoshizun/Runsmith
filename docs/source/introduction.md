@@ -27,7 +27,7 @@ Default constraints in this FSM:
 
 - **Heartbeat timeout (`keepalive=2s` on `running`)**: the state actor method must emit a heartbeat at least every 2 seconds, or the worker is marked unhealthy.
 - **Transition timeout (`1s` on core edges)**: transition hooks methods on each transition path (e.g., `starting -> running`, `running -> terminating`) must complete quickly. 
-- **State timeout (`10s` on `starting` and `terminating`)**: a worker cannot remain in these states longer than 10 seconds total, even if it the heartbeats are on time.
+- **State timeout (`10s` on `starting` and `terminating`)**: a worker cannot remain in these states longer than 10 seconds total, even if heartbeats are on time.
 
 When any constraint is violated, the supervisor restarts the worker (subject to restart quota).
 

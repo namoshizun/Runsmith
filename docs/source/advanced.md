@@ -10,7 +10,7 @@ In addition to the provided `DefaultWorkerFSM` (`idle -> starting -> running -> 
 
 ```python
 from typing import Literal
-from runsmith.constraints import HeartbeatTimeout, StateTimeout
+from runsmith.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
 from runsmith.state import StateMachine, TransitionTable
 
 WorkerState = Literal["idle", "warming", "processing", "cleanup", "crashed", "stopped"]
