@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, ClassVar, get_args, get_type_hints
 
 PrimitiveValue = bool | int | float | str
@@ -53,10 +53,14 @@ class Settings:
         _reject_unknown(overrides, known_fields)
         hints = get_type_hints(type(self))
 
-        for field in known_fields:
-            expected_type = _extract_primitive_type(hints[field.name])
-            raw = _resolve_value(field, overrides, type(self)._env_prefix)
-            object.__setattr__(self, field.name, _coerce(raw, expected_type, field.name))
+        for setting_field in known_fields:
+            expected_type = _extract_primitive_type(hints[setting_field.name])
+            raw = _resolve_value(setting_field, overrides, type(self)._env_prefix)
+            object.__setattr__(
+                self,
+                setting_field.name,
+                _coerce(raw, expected_type, setting_field.name),
+            )
 
 
 def _reject_unknown(
@@ -92,11 +96,41 @@ def _resolve_value(
 class RunsmithSettings(Settings):
     _env_prefix: ClassVar[str] = "RUNSMITH_"
 
-    supervision_interval: float = 0.25
-    supervisor_restart_quota: int = 3
-    worker_restart_quota: int = 3
-    activity_queue_maxsize: int = 100
-    activity_callback_task_queue_size: int = 16
+    supervision_interval: float = field(
+        default=0.25,
+        metadata={
+            "doc": "Seconds between supervisor health-check cycles.",
+            "group": "Supervision cadence",
+        },
+    )
+    supervisor_restart_quota: int = field(
+        default=3,
+        metadata={
+            "doc": "Maximum restarts for a child supervisor node before escalation.",
+            "group": "Restart policy",
+        },
+    )
+    worker_restart_quota: int = field(
+        default=3,
+        metadata={
+            "doc": "Maximum restarts for a leaf worker before escalation.",
+            "group": "Restart policy",
+        },
+    )
+    activity_queue_maxsize: int = field(
+        default=100,
+        metadata={
+            "doc": "Maximum buffered WorkerActivity events in the shared queue.",
+            "group": "Activity pipeline capacity",
+        },
+    )
+    activity_callback_task_queue_size: int = field(
+        default=16,
+        metadata={
+            "doc": "Maximum pending on_activity tasks in async mode.",
+            "group": "Activity pipeline capacity",
+        },
+    )
 
 
 settings = RunsmithSettings()

@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import multiprocessing
 import signal
 import sys
@@ -192,6 +193,9 @@ class SyncSupervisor(
             self._worker_templates[worker.name] = worker
 
     def run(self, on_activity: SyncOnActivityCallback = noop):
+        if inspect.iscoroutinefunction(on_activity):
+            raise TypeError("on_activity must be a sync callback for sync supervisors")
+
         # The root supervisor's entry point
         term_event = threading.Event()
 
@@ -307,6 +311,9 @@ class AsyncSupervisor(
             self._worker_templates[worker.name] = worker
 
     async def run(self, on_activity: AsyncOnActivityCallback = anoop):
+        if not inspect.iscoroutinefunction(on_activity):
+            raise TypeError("on_activity must be an async callback for async supervisors")
+
         # The root supervisor's entry point
         term_event = asyncio.Event()
         callbacks = CoroutineQueue(max_pending=settings.activity_callback_task_queue_size)
