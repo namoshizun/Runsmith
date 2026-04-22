@@ -12,6 +12,14 @@
   "reportUnusedCallResult": false,
   "deprecateTypingAliases": true,
   "ignore": [".venv"],
-  "exclude": [".venv", "recipes", "**/node_modules", "**/__pycache__", "tests"],
+  "exclude": [
+    ".venv",
+    "recipes",
+    "**/node_modules",
+    "**/__pycache__",
+    "tests",
+    "docs",
+    "examples"
+  ],
   "pythonPlatform": "Linux"
 }

@@ -10,3 +10,8 @@ wheels/
 .venv
 
 .coverage
+
+# Sphinx build artifacts
+docs/_build/
+docs/source/api/generated/
+docs/source/generated/
