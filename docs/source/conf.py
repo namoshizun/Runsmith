@@ -42,7 +42,7 @@ html_title = "Runsmith"
 html_logo = "../logo.svg"
 html_theme_options = {
     "repository_url": "https://github.com/namoshizun/Runsmith",
-    "use_repository_button": False,
+    "use_repository_button": True,
     "show_toc_level": 2,
 }
 html_static_path = ["_static"]

@@ -1,6 +1,6 @@
 [project]
 name = "runsmith"
-version = "0.1.0"
+version = "1.0.0"
 description = "Runsmith - A supervisor-tree framework for building resilient systems"
 readme = "README.md"
 requires-python = ">=3.10"
