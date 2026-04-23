@@ -1,6 +1,7 @@
 # Runsmith
 
-*Supervisor-tree framework for building predictable and resilient programs.*
+*Supervisor-tree framework for building predictable and resilient programs.*  
+*Version: {{ version }}*
 
 ```bash
 pip install runsmith

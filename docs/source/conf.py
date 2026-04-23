@@ -7,12 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, get_type_hints
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from runsmith import __version__
+
 project = "Runsmith"
 author = "Di Lu"
 copyright = f"{datetime.now().year}, {author}"
-release = "0.1.0"
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+version = __version__
+release = __version__
 
 extensions = [
     "myst_parser",
@@ -31,14 +33,15 @@ autosummary_generate = True
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
 
-myst_enable_extensions = ["colon_fence"]
+myst_enable_extensions = ["colon_fence", "substitution"]
+myst_substitutions = {"version": __version__}
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }
 
 html_theme = "sphinx_book_theme"
-html_title = "Runsmith"
+html_title = f"Runsmith {__version__}"
 html_logo = "../logo.svg"
 html_theme_options = {
     "repository_url": "https://github.com/namoshizun/Runsmith",

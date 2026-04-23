@@ -27,4 +27,4 @@ pip install runsmith
 
 ## Documentation
 
-Full documentation, quickstart guide, and examples at **https://namoshizun.github.io/Runsmith**.
+Full documentation, quickstart guide, and examples at **https://runsmith.lu-d.com**.
