@@ -102,6 +102,9 @@ class StateMachine(Generic[TState, TEvent]):
         return self._constraints
 
     def get_target_state(self, state: TState, event: TEvent) -> TState:
+        if state in self._terminal_states:
+            raise InvalidTransitionError(state, event)
+
         try:
             return self._transitions[state][event]  # pyright: ignore[reportIndexIssue]
         except KeyError:

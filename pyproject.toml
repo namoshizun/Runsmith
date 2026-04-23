@@ -46,3 +46,6 @@ filterwarnings = [
     "ignore::FutureWarning",
 ]
 addopts = "-v --cov=runsmith --cov-report=term"
+
+[tool.coverage.run]
+omit = ["runsmith/__init__.py", "runsmith/scripts.py"]
