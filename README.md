@@ -7,7 +7,8 @@
 
 <p float="left">
   <img src="https://github.com/namoshizun/Runsmith/actions/workflows/deploy-docs.yml/badge.svg?branch=main" />
-  <img src="https://github.com/namoshizun/Runsmith/actions/workflows/tests.yml/badge.svg?branch=main&event=push" /> 
+  <img src="https://github.com/namoshizun/Runsmith/actions/workflows/tests.yml/badge.svg?branch=main&event=push" />
+  <a href="https://codecov.io/gh/namoshizun/Runsmith"><img src="https://codecov.io/gh/namoshizun/Runsmith/graph/badge.svg?branch=main" alt="codecov coverage" /></a>
 </p>
 
 
