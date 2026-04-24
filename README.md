@@ -12,13 +12,15 @@
 </p>
 
 
-Runsmith is a Python 3.10+ library for building resilient, long-running programs. Workers are modeled as **finite-state machines** and run in threads, OS processes, or asyncio tasks. A supervisor monitors them continuously, detects failures through typed constraints, and restarts them automatically within configurable quotas.
+**Not every Python service is a web app. Many systems are composed of multiple independently running units** — think of an ETL service with a data poller, a transformer, and a result notifier, each with its own lifecycle, failure modes, and recovery needs. Wiring this by hand with retry loops, watchdog threads, and scattered state flags brittle glue code that is hard to reason about.
+
+Runsmith brings structure to this problem. Each unit becomes a **worker** with an explicit FSM lifecycle. A **supervisor** tree monitors every worker continuously — detecting stalls and timeouts, not just crashes — and confines restarts to the failed unit so the rest of the system keeps running.
 
 **Predictable** — every worker lifecycle is declared upfront as an FSM. No hidden control flow.
 
 **Composable** — supervisors are workers too. Nest them at any depth, freely mixing thread, process, and asyncio execution in one tree.
 
-**Resilient** — heartbeat, transition, and state-residence timeouts are enforced automatically. Failed workers are restarted; the rest of the tree stays healthy.
+**Resilient** — heartbeat, transition, and state-residence timeouts are enforced automatically. Failed workers are restarted within configurable quotas.
 
 ## Install
 

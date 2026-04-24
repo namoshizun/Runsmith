@@ -1,13 +1,15 @@
 # Introduction
 
-Runsmith is a Python 3.10+ library for building resilient, long-running programs using a supervisor-tree architecture. Workers are **finite-state machines** (FSMs) with explicit states, typed events, and declared terminal conditions. Workers are **backend-agnostic** and Runsmith supports threads, OS processes, and asyncio tasks. Supervisors continuously evaluate health and restart unhealthy workers within configurable quotas.
+Not every Python service is a web app. Many systems are composed of multiple independently running units — think of an ETL service with a data poller, a transformer, and a result notifier, each with its own lifecycle, failure modes, and recovery needs. Wiring this by hand with retry loops, watchdog threads, and scattered state flags brittle glue code that is hard to reason about.
+
+Runsmith brings structure to this problem. Each unit becomes a **worker** with an explicit FSM lifecycle. A supervisor tree monitors every worker continuously — detecting stalls and timeouts, not just crashes — and confines restarts to the failed unit so the rest of the system keeps running.
 
 ```{admonition} Design pillars
 :class: tip
 
-- **Predictability**: every worker lifecycle is modeled as a finite-state machine. States, transitions, and terminal conditions are declared upfront with plain Python types.
-- **Composability**: supervisors are workers too, so you can nest supervision nodes at any depth and mix thread, process, and asyncio execution in one tree.
-- **Resilience**: workers emit continuous activity. Constraint violations such as heartbeat timeout, transition timeout, and state residence timeout are detected automatically and recovered via restart quotas.
+- **Predictable**: worker lifecycles are finite-state machines declared upfront with plain Python types. No hidden control flow.
+- **Composable**: supervisors are workers too — nest them at any depth, freely mixing thread, process, and asyncio execution in one tree.
+- **Resilient**: heartbeat, transition, and state-residence timeouts are enforced automatically. Failed workers are restarted within configurable quotas.
 ```
 
 ## Another `supervisord`?
