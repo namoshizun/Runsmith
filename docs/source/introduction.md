@@ -14,11 +14,11 @@ Runsmith brings structure to this problem. Each unit becomes a **worker** with a
 
 ## Another `supervisord`?
 
-Runsmith and supervisord solve different problems. `supervisord` is an OS-level process control daemon that manages external programs by PID and static config. Runsmith is an in-process, programmable Python library where the supervised unit is a typed worker with an explicit lifecycle.
+Runsmith and supervisord solve different problems. `supervisord` is an OS-level process control daemon that manages external programs by PID and static config. Runsmith is an in-process, programmable and opinionated Python library where the supervised unit is a typed worker with an explicit lifecycle.
 
 That gives a few advantages not present in `supervisord`:
 
-- **Rich concurrency models**: beyond process-only orchestration, workers can run in threads or co-routines, or even custom execution backends.
+- **Rich concurrency models**: beyond process-only orchestration, workers can run in threads or co-routines
 - **Fine-grained health probes**: failure is not just an abnormal process exit, but a constraint violation that can be detected and recovered from.
 - **Supervisor-tree**: Erlang/OTP style supervisor-tree for nested fault domains.
 
