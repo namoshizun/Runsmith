@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
 
-from runsmith.utils import CoroutineQueue, Timer
+from runsmith.utils import CoroutineQueue, Timer, kill_thread
 
 # ── Timer ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,33 @@ def test_timer_warning_with_unformattable_message() -> None:
     # If the message format fails loguru still logs (no {duration} placeholder).
     with Timer(warning_thresh=0, warning_message="no placeholder here"):
         pass
+
+
+# ── kill_thread ────────────────────────────────────────────────────────────────
+
+
+def test_kill_thread_raises_for_unknown_thread_id() -> None:
+    with pytest.raises(ValueError, match="No active thread"):
+        kill_thread(-1)
+
+
+def test_kill_thread_stops_thread_running_python_code() -> None:
+    started = threading.Event()
+
+    def busy_loop() -> None:
+        started.set()
+        while True:
+            pass
+
+    thread = threading.Thread(target=busy_loop)
+    thread.start()
+    assert started.wait(timeout=1)
+    assert thread.ident is not None
+
+    kill_thread(thread.ident)
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
 
 
 # ── CoroutineQueue ────────────────────────────────────────────────────────────

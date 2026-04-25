@@ -1,4 +1,6 @@
 import asyncio
+import ctypes
+import threading
 import time
 from collections import deque
 from collections.abc import Coroutine
@@ -92,3 +94,39 @@ class CoroutineQueue:
         if self._pending:
             await asyncio.gather(*self._pending, return_exceptions=True)
         self._collect_completed()
+
+
+def kill_thread(thread_id: int) -> None:
+    """
+    Forcefully stop a Python thread by injecting SystemExit into its frame.
+
+    This uses CPython's PyThreadState_SetAsyncExc API. The exception is raised
+    the next time the target thread runs Python bytecode; it cannot interrupt a
+    thread currently stuck inside a native syscall or C extension.
+
+    Args:
+        thread_id: The integer thread identifier (e.g. thread.ident).
+
+    Raises:
+        ValueError: If no active thread with the given ID can be found.
+        RuntimeError: If CPython reports that multiple thread states were affected.
+    """
+    if not any(t.ident == thread_id for t in threading.enumerate()):
+        raise ValueError(f"No active thread with id {thread_id}")
+
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_ulong(thread_id),
+        ctypes.py_object(SystemExit),
+    )
+    if res == 0:
+        raise ValueError(
+            f"PyThreadState_SetAsyncExc: no Python thread state found for id {thread_id}"
+        )
+
+    if res > 1:
+        # More than one thread was affected — this should never happen, but if it
+        # does we revert immediately to avoid corrupting the interpreter state.
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(thread_id), None)
+        raise RuntimeError(
+            "PyThreadState_SetAsyncExc affected multiple threads unexpectedly — reverted"
+        )
