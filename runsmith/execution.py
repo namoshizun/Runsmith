@@ -8,6 +8,7 @@ from typing import Any, Protocol, TypeVar
 from loguru import logger
 
 from runsmith.core import EXIT_SIGNALS, IEvent, IQueue
+from runsmith.utils import kill_thread
 from runsmith.worker import (
     AsyncWorker,
     AsyncWorkerLoop,
@@ -101,7 +102,13 @@ class ThreadExecutor(threading.Thread):
         self.term_event.set()
 
     def kill(self):
-        logger.warning("Killing a thread is risky and ill-defined 🤨 We won't do anything...")
+        assert self.ident is not None
+        logger.warning(
+            f"Forcefully killing thread worker [{self.name}]. "
+            "There is no guarantee that the thread will be interrupted and terminated. "
+            "Did you actually write cooperative worker?",
+        )
+        kill_thread(self.ident)
 
 
 class ProcessExecutor(multiprocessing.Process):

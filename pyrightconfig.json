@@ -14,6 +14,8 @@
   "ignore": [".venv"],
   "exclude": [
     ".venv",
+    "build",
+    "dist",
     "recipes",
     "**/node_modules",
     "**/__pycache__",

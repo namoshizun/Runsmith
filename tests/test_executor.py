@@ -26,6 +26,17 @@ class QuickSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
         return self.emit("complete")
 
 
+class StuckSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    @actor("starting")
+    def setup(self):
+        return self.emit("run")
+
+    @actor("running")
+    def running(self):
+        while True:
+            pass
+
+
 class QuickAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("starting")
     async def setup(self):
@@ -56,6 +67,24 @@ def test_thread_executor_runs_worker_and_emits_activities() -> None:
     assert not activity_queue.empty()
     first_activity = activity_queue.get_nowait()
     assert first_activity.worker_name == "thread-worker"
+
+
+def test_thread_executor_kill_stops_thread_running_python_code() -> None:
+    worker = StuckSyncWorker("stuck-thread-worker")
+    activity_queue: Queue[WorkerActivity] = Queue()
+    executor = ThreadExecutor(
+        worker=worker,
+        term_event=threading.Event(),
+        activity_queue=activity_queue,
+    )
+
+    executor.start()
+    assert activity_queue.get(timeout=1).worker_name == "stuck-thread-worker"
+
+    executor.kill()
+    executor.join(timeout=1)
+
+    assert not executor.is_alive()
 
 
 @pytest.mark.asyncio
