@@ -368,7 +368,7 @@ class AsyncSupervisor(
             now = time.monotonic()
             for name in tuple(self.units.keys()):
                 unit = self.units[name]
-                if unit.evaluator.is_healthy(now):
+                if unit.evaluator.is_healthy(now) and unit.executor.is_alive():
                     continue
 
                 if not unit.retryable():

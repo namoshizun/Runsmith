@@ -10,8 +10,7 @@ In addition to the provided `DefaultWorkerFSM` (`idle -> starting -> running -> 
 
 ```python
 from typing import Literal
-from runsmith.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
-from runsmith.state import StateMachine, TransitionTable
+from runsmith import HeartbeatTimeout, StateMachine, StateTimeout, TransitionTable, TransitionTimeout
 
 WorkerState = Literal["idle", "warming", "processing", "cleanup", "crashed", "stopped"]
 WorkerEvent = Literal["preload", "start", "stop", "complete", "error"]
@@ -127,7 +126,7 @@ If `__init__` has required arguments and `clone()` is missing, restart attempts 
 `SyncSupervisor.run()` and `AsyncSupervisor.run()` accept an optional `on_activity` callback that receives every `WorkerActivity` event emitted by the supervisor. It makes a clean integration point for service-level liveness signals (for example `systemd` watchdog pings) and telemetry pipelines
 
 ```python
-from runsmith.worker import WorkerActivity
+from runsmith import WorkerActivity
 
 def on_activity(activity: WorkerActivity) -> None:
     match activity.kind:

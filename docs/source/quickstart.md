@@ -11,10 +11,7 @@ A sync worker subclasses `SyncWorker[State, Event]` and uses decorators to defin
 ```python
 import time
 from loguru import logger
-from runsmith.decorators import actor, post
-from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
-from runsmith.supervisor import SyncSupervisor
-from runsmith.worker import SyncWorker
+from runsmith import DefaultWorkerEvent, DefaultWorkerState, SyncSupervisor, SyncWorker, actor, post
 
 
 class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
@@ -158,10 +155,7 @@ Async workers subclass `AsyncWorker[State, Event]` and implements asynchronous a
 ```python
 import asyncio
 from loguru import logger
-from runsmith.decorators import actor, post
-from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
-from runsmith.supervisor import AsyncSupervisor
-from runsmith.worker import AsyncWorker
+from runsmith import AsyncSupervisor, AsyncWorker, DefaultWorkerEvent, DefaultWorkerState, actor, post
 
 
 class SleepyAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
@@ -207,7 +201,7 @@ asyncio.run(main())
 `SyncSupervisor` is itself a `SyncWorker`, so it can be registered as a child of another supervisor. This forms a supervisor tree where each supervisor node independently manages and restarts its direct children.
 
 ```python
-from runsmith.supervisor import SyncSupervisor
+from runsmith import SyncSupervisor
 
 root = SyncSupervisor("root", "thread")
 child = SyncSupervisor("child", "process")
