@@ -11,7 +11,7 @@ from runsmith.state import StateMachine, TransitionTable
 from runsmith.supervisor import AsyncSupervisor, SyncSupervisor
 from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "AsyncSupervisor",
