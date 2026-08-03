@@ -128,7 +128,7 @@ class QueueReaderWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
         return QueueReaderWorker(name=self.name, queue=self.queue)
 ```
 
-If `__init__` has required arguments and `clone()` is missing, restart attempts fail.
+Override `clone()` only when you must copy state that is not a constructor argument.
 
 ## Activity callbacks
 

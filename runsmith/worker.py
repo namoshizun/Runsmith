@@ -115,22 +115,21 @@ class ActorFunction(Generic[TEvent]):
             return self._invoke(sleep_for)
         return self._ainvoke(sleep_for)
 
+_EXCLUDED_INIT_PARAMS = frozenset({"self", "name", "fsm"})
 
-class WorkerBase(abc.ABC, Generic[TState, TEvent]):
-    _hooks: ClassVar[_HooksMap]
-    execution_mode: ClassVar[Literal["sync", "async"]]
 
-    def __init_subclass__(cls, **kwargs: object):
-        super().__init_subclass__(**kwargs)
+class _WorkerMeta(abc.ABCMeta):
+    def __new__(
+        mcls,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, object],
+        **kwargs: object,
+    ):
+        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+        if name == "WorkerBase":
+            return cls
 
-        # Enforce custom clone method if __init__ is overridden
-        if "__init__" in cls.__dict__ and "clone" not in cls.__dict__:
-            raise TypeError(
-                f"{cls.__name__} overrides __init__ but does not override clone(). "
-                "You must implement clone() so the supervisor can safely reconstruct this worker."
-            )
-
-        # Initialize the hooks map
         hooks = copy.deepcopy(getattr(cls, "_hooks", _HooksMap()))
         for _attr in vars(cls).values():
             is_coro = inspect.iscoroutinefunction(_attr)
@@ -138,12 +137,11 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
             # Per the decorated hook method
             for hook in getattr(_attr, HOOK_ATTR, ()):
                 # Ensure the hook function is compatible with the worker's execution mode
-                if cls.execution_mode == "sync" and is_coro:
+                if getattr(cls, "execution_mode") == "sync" and is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is an async hook but the worker is a sync worker"
                     )
-
-                if cls.execution_mode == "async" and not is_coro:
+                if getattr(cls, "execution_mode") == "async" and not is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is a sync hook but the worker is an async worker"
                     )
@@ -157,7 +155,31 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
                     case ("actor", state, min_interval):
                         hooks.actors[state] = (_attr.__name__, min_interval)
 
-        cls._hooks = hooks
+        setattr(cls, "_hooks", hooks)
+        return cls
+
+    def __call__(cls, *args: object, **kwargs: object):
+        instance = super().__call__(*args, **kwargs)
+        sig = inspect.signature(cls.__init__)
+        bound = sig.bind(None, *args, **kwargs)
+        bound.apply_defaults()
+        meta: dict[str, object] = {}
+        for key, value in bound.arguments.items():
+            if key in _EXCLUDED_INIT_PARAMS:
+                continue
+            param = sig.parameters[key]
+            if param.kind is inspect.Parameter.VAR_KEYWORD:
+                meta.update({k: v for k, v in value.items() if k not in _EXCLUDED_INIT_PARAMS})
+            elif param.kind is not inspect.Parameter.VAR_POSITIONAL:
+                meta[key] = value
+        instance._meta = meta
+        return instance
+
+
+class WorkerBase(abc.ABC, Generic[TState, TEvent], metaclass=_WorkerMeta):
+    _hooks: ClassVar[_HooksMap]
+    execution_mode: ClassVar[Literal["sync", "async"]]
+    _meta: dict[str, object]
 
     def __init__(self, name: str, fsm: StateMachine[TState, TEvent] = DefaultWorkerFSM):
         self.name = name
@@ -172,7 +194,14 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         )
 
     def clone(self) -> Self:
-        return self.__class__(name=self.name, fsm=self.fsm)
+        kwargs = dict(self._meta)
+        params = inspect.signature(self.__class__.__init__).parameters
+        accepts_fsm = "fsm" in params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+        if accepts_fsm:
+            kwargs["fsm"] = self.fsm
+        return self.__class__(name=self.name, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def emit(self, signal: TEvent | Literal["keepalive"]):
         # A thin wrapper to make the typing work
