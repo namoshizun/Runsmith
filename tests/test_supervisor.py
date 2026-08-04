@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing
+import threading
 import time
 from queue import Queue
 from unittest.mock import MagicMock
@@ -17,7 +18,7 @@ from runsmith.errors import (
     NoWorkersRegisteredError,
 )
 from runsmith.evaluator import WorkerStatusEvaluator
-from runsmith.execution import ProcessExecutor
+from runsmith.execution import ProcessExecutor, drive_sync_worker
 from runsmith.settings import RunsmithSettings
 from runsmith.supervisor import AsyncSupervisor, SupervisionUnit, SyncSupervisor
 from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity
@@ -30,7 +31,7 @@ class QuickSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
 
     @actor("running")
     def running(self):
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
     def teardown(self):
@@ -44,7 +45,7 @@ class QuickAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
 
     @actor("running")
     async def running(self):
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
     async def teardown(self):
@@ -246,14 +247,14 @@ def test_sync_supervisor_boot_emits_error_when_no_workers() -> None:
     assert result == "error"
 
 
-def test_sync_supervisor_supervise_emits_terminate_on_stop(
+def test_sync_supervisor_supervise_emits_complete_on_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
     sup = SyncSupervisor("s", "thread")
     sup._activity_queue = Queue()  # pyright: ignore[reportPrivateUsage]
     sup.ctx.cmd = "stop"
-    assert sup._supervise() == "terminate"
+    assert sup._supervise() == "complete"
 
 
 def test_sync_supervisor_supervise_emits_keepalive_with_healthy_units(
@@ -262,6 +263,13 @@ def test_sync_supervisor_supervise_emits_keepalive_with_healthy_units(
     monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
     sup = SyncSupervisor("s", "thread")
     sup._activity_queue = Queue()  # pyright: ignore[reportPrivateUsage]
+    sup.register_workers(QuickSyncWorker("w"))
+    sup.materialize_units()
+
+    mock_executor = MagicMock()
+    mock_executor.is_alive.return_value = True
+    sup.units["w"].executor = mock_executor
+
     assert sup._supervise() == "keepalive"
 
 
@@ -279,7 +287,6 @@ def test_sync_supervisor_supervise_restarts_dead_retryable_unit(
     sup.units["w"].executor = mock_executor
 
     result = sup._supervise()
-
     assert result == "keepalive"
     assert sup.units["w"].restart_count == 1
     sup.units["w"].executor.join(timeout=2.0)  # type: ignore[union-attr]
@@ -301,7 +308,33 @@ def test_sync_supervisor_supervise_terminates_when_restart_quota_exhausted(
     sup.units["w"].executor = mock_executor
     sup.units["w"].restart_count = real_settings.worker_restart_quota
 
-    assert sup._supervise() == "terminate"
+    # Giving up routes into `reaping` rather than straight into `crashed`
+    assert sup._supervise() == "error"
+    assert sup.fsm.get_target_state("running", "error") == "reaping"
+
+
+def test_sync_supervisor_reaping_drains_subtree_before_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
+    sup = SyncSupervisor("s", "thread")
+    sup._activity_queue = Queue()  # pyright: ignore[reportPrivateUsage]
+    sup.register_workers(QuickSyncWorker("w"))
+    sup.materialize_units()
+
+    mock_executor = MagicMock()
+    mock_executor.is_alive.return_value = True
+    sup.units["w"].executor = mock_executor
+
+    # The subtree is still up, so reaping must keep draining
+    assert sup._shutdown() == "keepalive"
+    mock_executor.stop.assert_called()
+
+    mock_executor.is_alive.return_value = False
+    assert sup._shutdown() == "complete"
+    # ...and a finished reap always lands in `crashed`, whichever event ends it
+    assert sup.fsm.get_target_state("reaping", "complete") == "crashed"
+    assert sup.fsm.get_target_state("reaping", "error") == "crashed"
 
 
 def test_sync_supervisor_shutdown_emits_complete_when_no_alive_executors(
@@ -373,23 +406,30 @@ async def test_async_supervisor_boot_emits_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_supervisor_supervise_emits_terminate_on_stop(
+async def test_async_supervisor_supervise_emits_complete_on_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
     sup = AsyncSupervisor("s")
     sup._activity_queue = asyncio.Queue()  # pyright: ignore[reportPrivateUsage]
     sup.ctx.cmd = "stop"
-    assert await sup._supervise() == "terminate"
+    assert await sup._supervise() == "complete"
 
 
 @pytest.mark.asyncio
-async def test_async_supervisor_supervise_emits_keepalive_with_no_units(
+async def test_async_supervisor_supervise_emits_keepalive_with_healthy_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
     sup = AsyncSupervisor("s")
     sup._activity_queue = asyncio.Queue()  # pyright: ignore[reportPrivateUsage]
+    sup.register_workers(QuickAsyncWorker("a"))
+    sup.materialize_units()
+
+    mock_executor = MagicMock()
+    mock_executor.is_alive.return_value = True
+    sup.units["a"].executor = mock_executor
+
     assert await sup._supervise() == "keepalive"
 
 
@@ -401,3 +441,220 @@ async def test_async_supervisor_shutdown_emits_complete_with_no_alive_executors(
     sup = AsyncSupervisor("s")
     sup._activity_queue = asyncio.Queue()  # pyright: ignore[reportPrivateUsage]
     assert await sup._shutdown() == "complete"
+
+
+# ── Completion semantics ──────────────────────────────────────────────────────
+
+
+class OneShotSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.runs = 0
+
+    def clone(self) -> "OneShotSyncWorker":
+        return OneShotSyncWorker(self.name)
+
+    @actor("starting")
+    def setup(self):
+        return self.emit("run")
+
+    @actor("running")
+    def run_once(self):
+        self.runs += 1
+        return self.emit("complete")
+
+    @actor("terminating")
+    def teardown(self):
+        return self.emit("complete")
+
+
+class CrashingSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    @actor("starting")
+    def setup(self):
+        return self.emit("error")
+
+
+class OneShotAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.runs = 0
+
+    def clone(self) -> "OneShotAsyncWorker":
+        return OneShotAsyncWorker(self.name)
+
+    @actor("starting")
+    async def setup(self):
+        return self.emit("run")
+
+    @actor("running")
+    async def run_once(self):
+        self.runs += 1
+        return self.emit("complete")
+
+    @actor("terminating")
+    async def teardown(self):
+        return self.emit("complete")
+
+
+def test_sync_supervisor_run_returns_after_one_shot_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    monkeypatch.setattr(
+        supervisor_module,
+        "settings",
+        RunsmithSettings(supervision_interval=0.01, worker_restart_quota=1),
+    )
+
+    worker = OneShotSyncWorker("one-shot")
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor.register_workers(worker)
+    supervisor.run()
+
+    assert list(supervisor.units["one-shot"].worker.ctx.history)[-1] == ("complete", "stopped")
+    assert supervisor.units["one-shot"].retired
+    assert supervisor.units["one-shot"].restart_count == 0
+
+
+def test_sync_supervisor_retires_completed_unit_alongside_live_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor.register_workers(OneShotSyncWorker("done"), QuickSyncWorker("live"))
+    supervisor._activity_queue = Queue()  # pyright: ignore[reportPrivateUsage]
+    supervisor.materialize_units()
+
+    done = supervisor.units["done"]
+    live = supervisor.units["live"]
+    done.executor = MagicMock()
+    done.executor.is_alive.return_value = False
+    done.evaluator.record(
+        WorkerActivity(
+            worker_name="done",
+            kind="transition_end",
+            transition=("terminating", "complete", "stopped"),
+            timestamp=time.monotonic(),
+        )
+    )
+    live.executor = MagicMock()
+    live.executor.is_alive.return_value = True
+
+    assert supervisor._supervise() == "keepalive"
+    assert done.retired
+    assert not live.retired
+    assert done.restart_count == 0
+
+
+def test_sync_supervisor_restarts_worker_that_reaches_error_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(supervision_interval=0.001))
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor.register_workers(CrashingSyncWorker("crashy"))
+    supervisor._activity_queue = Queue()  # pyright: ignore[reportPrivateUsage]
+    supervisor.materialize_units()
+
+    unit = supervisor.units["crashy"]
+    unit.executor = MagicMock()
+    unit.executor.is_alive.return_value = False
+    unit.evaluator.record(
+        WorkerActivity(
+            worker_name="crashy",
+            kind="transition_end",
+            transition=("starting", "error", "crashed"),
+            timestamp=time.monotonic(),
+        )
+    )
+
+    assert supervisor._supervise() == "keepalive"
+    assert supervisor.units["crashy"].restart_count == 1
+    supervisor.units["crashy"].executor.join(timeout=2.0)  # type: ignore[union-attr]
+
+
+def test_sync_supervisor_reaches_crashed_after_reaping_subtree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    monkeypatch.setattr(
+        supervisor_module,
+        "settings",
+        RunsmithSettings(supervision_interval=0.01, worker_restart_quota=1),
+    )
+
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor.register_workers(CrashingSyncWorker("crashy"))
+    supervisor.run()
+
+    # An unsalvageable child escalates through `reaping`, never straight into `crashed`
+    assert list(supervisor.ctx.history)[-2:] == [
+        ("error", "reaping"),
+        ("complete", "crashed"),
+    ]
+    assert supervisor.all_executors_down
+
+
+def test_nested_parent_restarts_a_crashed_child_supervisor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    monkeypatch.setattr(
+        supervisor_module,
+        "settings",
+        RunsmithSettings(
+            supervision_interval=0.01, worker_restart_quota=1, supervisor_restart_quota=1
+        ),
+    )
+
+    child = SyncSupervisor("child", "thread")
+    child.register_workers(CrashingSyncWorker("crashy"))
+    root = SyncSupervisor("root", "thread")
+    root.register_workers(child)
+    root.run()
+
+    # A child that reaped itself into `crashed` reads as a failure, so it gets restarted
+    assert root.units["child"].restart_count == 1
+    assert root.all_executors_down
+
+
+def test_plain_worker_reports_failure_without_reaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reaping is a supervisor concern; a leaf worker has no subtree to reap."""
+
+    class FailingSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+        @actor("starting")
+        def setup(self):
+            return self.emit("run")
+
+        @actor("running")
+        def work(self):
+            return self.emit("error")
+
+    worker = FailingSyncWorker("plain")
+    for _ in drive_sync_worker(worker.main_loop(), threading.Event()):
+        pass
+
+    assert list(worker.ctx.history)[-1] == ("error", "crashed")
+    assert "reaping" not in worker.fsm.get_transitions()
+
+
+@pytest.mark.asyncio
+async def test_async_supervisor_run_returns_after_one_shot_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    monkeypatch.setattr(
+        supervisor_module,
+        "settings",
+        RunsmithSettings(supervision_interval=0.05, worker_restart_quota=1),
+    )
+
+    worker = OneShotAsyncWorker("one-shot")
+    supervisor = AsyncSupervisor("root")
+    supervisor.register_workers(worker)
+    await supervisor.run()
+
+    assert list(supervisor.units["one-shot"].worker.ctx.history)[-1] == ("complete", "stopped")
+    assert supervisor.units["one-shot"].retired
+    assert supervisor.units["one-shot"].restart_count == 0

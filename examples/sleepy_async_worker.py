@@ -25,7 +25,7 @@ class SleepyAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     async def sleepy(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
 
         await asyncio.sleep(1)
         logger.info(f"[{self.name}] Zzzzz...")

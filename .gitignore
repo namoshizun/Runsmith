@@ -16,3 +16,6 @@ coverage.xml
 docs/_build/
 docs/source/api/generated/
 docs/source/generated/
+
+.cursor/plans
+.DS_Store

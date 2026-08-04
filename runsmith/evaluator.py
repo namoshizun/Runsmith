@@ -3,7 +3,7 @@ import dataclasses
 import math
 
 from runsmith.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
-from runsmith.state import StateMachine
+from runsmith.state import StateMachine, Terminal
 from runsmith.worker import WorkerActivity
 
 
@@ -29,7 +29,7 @@ class WorkerConstraints:
     heartbeat_timeouts: dict[str, float]  # state => timeout
     transition_timeouts: dict[tuple[str, str], float]  # (src, tgt) => timeout
     state_timeouts: dict[str, float]  # state => max residence time
-    terminal_states: frozenset[str]
+    terminal_outcomes: dict[str, Terminal]
 
     @classmethod
     def from_fsm(cls, fsm: StateMachine) -> "WorkerConstraints":
@@ -51,7 +51,11 @@ class WorkerConstraints:
             heartbeat_timeouts=heartbeat_timeouts,
             transition_timeouts=transition_timeouts,
             state_timeouts=state_timeouts,
-            terminal_states=frozenset(map(str, fsm.get_terminal_states())),
+            terminal_outcomes={
+                str(state): outcome
+                for state in fsm.get_terminal_states()
+                if (outcome := fsm.get_terminal_outcome(state))
+            },
         )
 
 
@@ -85,14 +89,15 @@ class WorkerStatusEvaluator:
                 exp.reset_heartbeat()
                 exp.reset_state_expiry()
 
-                if tgt not in constraints.terminal_states:
-                    if timeout := constraints.heartbeat_timeouts.get(tgt):
+                if tgt not in constraints.terminal_outcomes:
+                    # Update expectations regarding the new state
+                    if beat_timeout := constraints.heartbeat_timeouts.get(tgt):
                         # The new state expects periodic heartbeats
-                        exp.next_heartbeat = ts + timeout
+                        exp.next_heartbeat = ts + beat_timeout
 
-                    if timeout := constraints.state_timeouts.get(tgt):
+                    if residence_timeout := constraints.state_timeouts.get(tgt):
                         # The new state has a residence timeout
-                        exp.state_expiry = ts + timeout
+                        exp.state_expiry = ts + residence_timeout
 
             case "heartbeat":
                 # Update the next heartbeat's expected arrival time
@@ -104,3 +109,6 @@ class WorkerStatusEvaluator:
         return (
             now <= exp.transition_deadline and now <= exp.next_heartbeat and now <= exp.state_expiry
         )
+
+    def terminal_outcome(self) -> Terminal | None:
+        return self._constraints.terminal_outcomes.get(self._expectation.state)

@@ -108,7 +108,11 @@ class ThreadExecutor(threading.Thread):
             "There is no guarantee that the thread will be interrupted and terminated. "
             "Did you actually write cooperative worker?",
         )
-        kill_thread(self.ident)
+        try:
+            kill_thread(self.ident)
+        except ValueError:
+            # Raced with the thread exiting on its own, which is the outcome we wanted anyway
+            logger.debug(f"Thread worker [{self.name}] had already exited")
 
 
 class ProcessExecutor(multiprocessing.Process):

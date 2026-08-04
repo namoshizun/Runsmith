@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import copy
 import dataclasses
 import inspect
@@ -8,7 +9,7 @@ import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 from functools import cache
-from typing import ClassVar, Generic, Literal, cast, overload
+from typing import Any, ClassVar, Generic, Literal, cast, overload
 
 from loguru import logger
 
@@ -35,6 +36,11 @@ TEvent = TypeVar("TEvent", bound=str)
 TState = TypeVar("TState", bound=str)
 
 
+ExecutionMode = Literal["sync", "async"]
+SyncActorFunc = Callable[[], TEvent | Literal["keepalive"]]
+AsyncActorFunc = Callable[[], Awaitable[TEvent | Literal["keepalive"]]]
+
+
 @dataclasses.dataclass(slots=True)
 class WorkerActivity:
     kind: Literal["transition_begin", "transition_end", "heartbeat"]
@@ -47,11 +53,66 @@ class WorkerActivity:
 class _HooksMap:
     pre: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
     post: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
-    actors: dict[str, str] = dataclasses.field(default_factory=dict)
+    # state => (method name, min_interval)
+    actors: dict[str, tuple[str, float | int | None]] = dataclasses.field(default_factory=dict)
 
 
 SyncWorkerLoop = Generator[WorkerActivity, ExecutorCommand, None]
 AsyncWorkerLoop = AsyncGenerator[WorkerActivity, ExecutorCommand]
+
+
+class ActorFunction(Generic[TEvent]):
+    def __init__(
+        self,
+        mode: ExecutionMode,
+        *,
+        cb: Callable[..., Any] | None = None,
+        always: TEvent | None = None,
+        min_interval: int | float | None = None,
+    ):
+        if cb is None:
+            assert always is not None
+
+        self.always_evt = always
+        self.min_interval = min_interval
+        self.execution_mode = mode
+        self.cb = cb
+        self.__last_at = 0.0
+
+    def _invoke(self, sleep_for: float):
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
+        if self.always_evt:
+            return self.always_evt
+
+        assert self.cb is not None
+        return self.cb()
+
+    async def _ainvoke(self, sleep_for: float):
+        if sleep_for > 0:
+            await asyncio.sleep(sleep_for)
+
+        if self.always_evt:
+            return self.always_evt
+
+        assert self.cb is not None
+        return await self.cb()
+
+    def __call__(self):
+        elapsed = (now := time.monotonic()) - self.__last_at
+        self.__last_at = now
+
+        # Handle throttling
+        if self.min_interval and self.min_interval > 0:
+            sleep_for = self.min_interval - elapsed
+        else:
+            sleep_for = 0
+
+        sleep_for = max(0, sleep_for)
+        if self.execution_mode == "sync":
+            return self._invoke(sleep_for)
+        return self._ainvoke(sleep_for)
 
 
 class WorkerBase(abc.ABC, Generic[TState, TEvent]):
@@ -70,30 +131,30 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
 
         # Initialize the hooks map
         hooks = copy.deepcopy(getattr(cls, "_hooks", _HooksMap()))
-        for attr_val in vars(cls).values():
-            is_coro = inspect.iscoroutinefunction(attr_val)
+        for _attr in vars(cls).values():
+            is_coro = inspect.iscoroutinefunction(_attr)
 
             # Per the decorated hook method
-            for hook in getattr(attr_val, HOOK_ATTR, ()):
+            for hook in getattr(_attr, HOOK_ATTR, ()):
                 # Ensure the hook function is compatible with the worker's execution mode
                 if cls.execution_mode == "sync" and is_coro:
                     raise InvalidHookFunctionTypeError(
-                        f"{cls.__name__}.{attr_val.__name__} is an async hook but the worker is a sync worker"
+                        f"{cls.__name__}.{_attr.__name__} is an async hook but the worker is a sync worker"
                     )
 
                 if cls.execution_mode == "async" and not is_coro:
                     raise InvalidHookFunctionTypeError(
-                        f"{cls.__name__}.{attr_val.__name__} is a sync hook but the worker is an async worker"
+                        f"{cls.__name__}.{_attr.__name__} is a sync hook but the worker is an async worker"
                     )
 
                 # Register the hook function
                 match hook:
                     case ("pre", state, event):
-                        hooks.pre.setdefault((state, event), []).append(attr_val.__name__)
+                        hooks.pre.setdefault((state, event), []).append(_attr.__name__)
                     case ("post", state, event):
-                        hooks.post.setdefault((state, event), []).append(attr_val.__name__)
-                    case ("actor", state):
-                        hooks.actors[state] = attr_val.__name__
+                        hooks.post.setdefault((state, event), []).append(_attr.__name__)
+                    case ("actor", state, min_interval):
+                        hooks.actors[state] = (_attr.__name__, min_interval)
 
         cls._hooks = hooks
 
@@ -127,21 +188,16 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
 
     @cache
     def get_actor_func(self, state: TState):
-        def make_single_event_actor(event: TEvent):
-            async def async_inner():
-                return event
-
-            if self.execution_mode == "sync":
-                return lambda: event
-            return async_inner
-
         if state == self.fsm.get_initial_state():
-            return make_single_event_actor(self.fsm.get_initial_event())
+            return ActorFunction[TEvent](self.execution_mode, always=self.fsm.get_initial_event())
 
         try:
-            func_name = self._hooks.actors[state]
-            func = getattr(self, func_name)
-            return func
+            method_name, min_interval = self._hooks.actors[state]
+            return ActorFunction[TEvent](
+                self.execution_mode,
+                cb=getattr(self, method_name),
+                min_interval=min_interval,
+            )
         except (KeyError, AttributeError):
             # Fall through to the default event if no actor registered
             event_options = self.fsm.get_events(state)
@@ -154,7 +210,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
             logger.warning(
                 f"No actor registered for non-terminal state [{state}], fallback to the default event [{fallback_event}]"
             )
-            return make_single_event_actor(fallback_event)
+            return ActorFunction[TEvent](self.execution_mode, always=fallback_event)
 
     def make_activity(self, **kwargs: object) -> WorkerActivity:
         return WorkerActivity(worker_name=self.name, **kwargs)  # pyright: ignore[reportArgumentType]

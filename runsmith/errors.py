@@ -21,3 +21,7 @@ class NoWorkersRegisteredError(ValueError):
 
 class InvalidHookFunctionTypeError(TypeError):
     pass
+
+
+class RetryExhaustedError(RuntimeError):
+    pass

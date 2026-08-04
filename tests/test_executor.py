@@ -19,7 +19,7 @@ class QuickSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
 
     @actor("running")
     def running(self):
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
     def teardown(self):
@@ -44,7 +44,7 @@ class QuickAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
 
     @actor("running")
     async def running(self):
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
     async def teardown(self):

@@ -10,7 +10,14 @@ In addition to the provided `DefaultWorkerFSM` (`idle -> starting -> running -> 
 
 ```python
 from typing import Literal
-from runsmith import HeartbeatTimeout, StateMachine, StateTimeout, TransitionTable, TransitionTimeout
+from runsmith import (
+    HeartbeatTimeout,
+    StateMachine,
+    StateTimeout,
+    Terminal,
+    TransitionTable,
+    TransitionTimeout,
+)
 
 WorkerState = Literal["idle", "warming", "processing", "cleanup", "crashed", "stopped"]
 WorkerEvent = Literal["preload", "start", "stop", "complete", "error"]
@@ -20,8 +27,8 @@ WorkerTransitionTable: TransitionTable[WorkerState, WorkerEvent] = {
     "warming":    {"start": "processing", "error": "crashed"},
     "processing": {"stop": "cleanup",     "error": "crashed"},
     "cleanup":    {"complete": "stopped", "error": "crashed"},
-    "crashed": ...,
-    "stopped": ...,
+    "crashed": Terminal.ERROR,
+    "stopped": Terminal.OK,
 }
 
 WorkerFSM = StateMachine[WorkerState, WorkerEvent](
@@ -45,7 +52,9 @@ supervisor.register_workers(MyWorker("w1", fsm=WorkerFSM))
 A valid `StateMachine` must satisfy all of the following:
 
 - Exactly one state has no incoming edges (derived initial state).
-- At least one terminal state is declared with `...`.
+- At least one terminal state is declared with `Terminal.OK` or `Terminal.ERROR`.
+- `Terminal.OK` means successful completion; the supervisor retires the worker.
+- `Terminal.ERROR` means failure; the supervisor restarts the worker within its quota.
 - `initial_event` is an outgoing event from the initial state.
 - Every constraint `when` target references an existing state or transition.
 ```

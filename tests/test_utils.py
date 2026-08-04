@@ -54,6 +54,23 @@ def test_kill_thread_raises_for_unknown_thread_id() -> None:
         kill_thread(-1)
 
 
+def test_thread_executor_kill_tolerates_already_exited_thread() -> None:
+    from queue import Queue
+
+    from runsmith.execution import ThreadExecutor
+    from runsmith.worker import SyncWorker
+
+    executor = ThreadExecutor(
+        worker=SyncWorker("gone"), term_event=threading.Event(), activity_queue=Queue()
+    )
+    executor.start()
+    executor.join(timeout=2.0)
+    assert not executor.is_alive()
+
+    # Racing the thread's own exit must not blow up the supervisor's drain loop
+    executor.kill()
+
+
 def test_kill_thread_stops_thread_running_python_code() -> None:
     started = threading.Event()
 

@@ -6,7 +6,7 @@ from loguru import logger
 
 from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout
 from runsmith.decorators import actor
-from runsmith.state import StateMachine, TransitionTable
+from runsmith.state import StateMachine, Terminal, TransitionTable
 from runsmith.supervisor import SyncSupervisor
 from runsmith.worker import SyncWorker
 
@@ -18,8 +18,8 @@ WorkerTransitionTable: TransitionTable[WorkerState, WorkerEvent] = {
     "warming": {"start": "processing", "error": "crashed"},
     "processing": {"stop": "cleanup", "error": "crashed"},
     "cleanup": {"complete": "stopped", "error": "crashed"},
-    "crashed": ...,
-    "stopped": ...,
+    "crashed": Terminal.ERROR,
+    "stopped": Terminal.OK,
 }
 
 HEARTBEAT_TIMEOUT = 2

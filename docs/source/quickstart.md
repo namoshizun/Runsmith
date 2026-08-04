@@ -29,13 +29,13 @@ class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     def work(self):
         if self.ctx.cmd == "stop":
-            # Workers must be cooperative and honor the supervisor's stop signal.
-            return self.emit("terminate")
+            # Worker must be cooperative and honor the supervisor's stop signal.
+            return self.emit("complete")
 
         # Any blocking operation shall not exceed the `running` state's heartbeat timeout
         # (defaults to 2s)
         time.sleep(1)
-        # Sends a heartbeat, remains in `running`
+        # Remains in `running`, the `work` method will be invoked again
         return self.emit("keepalive")
 
     @actor("terminating")
@@ -49,7 +49,7 @@ supervisor.register_workers(
     SleepySyncWorker("foo"),  # worker name must be unique
     SleepySyncWorker("bar"),
 )
-supervisor.run()  # blocks until shutdown signal or all workers reach a terminal state
+supervisor.run()  # returns on shutdown signal, or when all workers reach Terminal.OK
 ```
 
 - `self.ctx.cmd` becomes `"stop"` when the supervisor signals workers to shutdown, usually due to process exit signals like `SIGTERM`.
@@ -172,7 +172,7 @@ class SleepyAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     async def work(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
         # Be careful not to block the event loop for too long.
         await asyncio.sleep(1)
         return self.emit("keepalive")

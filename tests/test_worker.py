@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -8,25 +9,25 @@ from runsmith.decorators import actor, pre
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
 from runsmith.errors import InvalidHookFunctionTypeError
 from runsmith.execution import drive_sync_worker
-from runsmith.state import StateMachine
+from runsmith.state import StateMachine, Terminal
 from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity
 
 
 class DemoSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("starting")
-    def setup(self) -> DefaultWorkerEvent:
+    def setup(self):
         return self.emit("run")
 
     @actor("running")
-    def running(self) -> DefaultWorkerEvent | str:
+    def running(self):
         cycles = int(self.ctx.data or 0)
         self.ctx.set_data(cycles + 1)
         if cycles == 0:
             return self.emit("keepalive")
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
-    def teardown(self) -> DefaultWorkerEvent:
+    def teardown(self):
         return self.emit("complete")
 
 
@@ -58,7 +59,7 @@ def test_sync_worker_main_loop_transitions_to_terminal_state() -> None:
     assert list(worker.ctx.history) == [
         ("start", "starting"),
         ("run", "running"),
-        ("terminate", "terminating"),
+        ("complete", "terminating"),
         ("complete", "stopped"),
     ]
 
@@ -73,7 +74,7 @@ class DemoAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
 
     @actor("running")
     async def running(self) -> DefaultWorkerEvent:
-        return self.emit("terminate")
+        return self.emit("complete")
 
     @actor("terminating")
     async def teardown(self) -> DefaultWorkerEvent:
@@ -95,7 +96,7 @@ async def test_async_worker_main_loop_transitions_to_terminal_state() -> None:
     assert list(worker.ctx.history) == [
         ("start", "starting"),
         ("run", "running"),
-        ("terminate", "terminating"),
+        ("complete", "terminating"),
         ("complete", "stopped"),
     ]
 
@@ -135,7 +136,7 @@ def test_pre_hook_invoked_during_state_entry() -> None:
 
         @actor("running")
         def running(self) -> DefaultWorkerEvent:
-            return self.emit("terminate")
+            return self.emit("complete")
 
         @actor("terminating")
         def teardown(self) -> DefaultWorkerEvent:
@@ -157,7 +158,7 @@ def _custom_fsm() -> StateMachine:
         transitions={
             "idle": {"begin": "middle"},
             "middle": {"done": "final"},
-            "final": ...,
+            "final": Terminal.OK,
         },
         initial_event="begin",
     )
@@ -175,10 +176,36 @@ def test_worker_raises_when_no_actor_and_multiple_events() -> None:
         transitions={
             "idle": {"begin": "fork"},
             "fork": {"left": "done", "right": "done"},
-            "done": ...,
+            "done": Terminal.OK,
         },
         initial_event="begin",
     )
     worker = SyncWorker("w", fsm=fsm)
     with pytest.raises(RuntimeError, match="No actor registered"):
         worker.get_actor_func("fork")  # type: ignore[arg-type]
+
+
+def test_actor_functions_are_isolated_per_worker_instance() -> None:
+    seen: list[str] = []
+
+    class ThrottledWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+        @actor("running", min_interval=0.2)
+        def work(self):
+            seen.append(self.name)
+            return self.emit("keepalive")
+
+    left = ThrottledWorker("left")
+    right = ThrottledWorker("right")
+    left_actor = left.get_actor_func("running")
+    right_actor = right.get_actor_func("running")
+
+    assert left_actor is not right_actor
+
+    left_actor()
+    right_actor()
+    assert seen == ["left", "right"]
+
+    # Each instance keeps its own throttle clock.
+    started = time.monotonic()
+    left_actor()
+    assert time.monotonic() - started >= 0.15

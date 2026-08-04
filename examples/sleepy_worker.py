@@ -25,7 +25,7 @@ class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     def sleepy(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
 
         time.sleep(1)
         logger.info(f"[{self.name}] Zzzzz...")

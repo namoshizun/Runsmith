@@ -21,7 +21,7 @@ class QueueReaderWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     def poll_queue(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
 
         try:
             self.queue.get(timeout=0.1)

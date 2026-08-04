@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 
 from runsmith.defaults import DefaultFSNPrettyPrinter, DefaultWorkerFSM
-from runsmith.state import StateMachine
+from runsmith.state import StateMachine, Terminal
 
 
 def _print(fsm: StateMachine) -> str:
@@ -33,6 +33,12 @@ def test_output_labels_terminal_states() -> None:
     assert "terminal" in out
 
 
+def test_output_labels_error_terminal_outcome() -> None:
+    out = _print(DefaultWorkerFSM)
+    assert "error" in out
+    assert "crashed" in out
+
+
 def test_output_shows_keepalive_constraint() -> None:
     out = _print(DefaultWorkerFSM)
     assert "keepalive" in out
@@ -51,7 +57,7 @@ def test_output_shows_transition_timeouts() -> None:
 def test_simple_fsm_without_constraints() -> None:
     """Covers branches where no keepalive/state_timeout/transition_timeout hints exist."""
     fsm = StateMachine(
-        transitions={"idle": {"go": "done"}, "done": ...},
+        transitions={"idle": {"go": "done"}, "done": Terminal.OK},
         initial_event="go",
     )
     out = _print(fsm)

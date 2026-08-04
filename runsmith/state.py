@@ -1,4 +1,5 @@
 import copy
+import enum
 import sys
 from collections.abc import Iterable
 from types import EllipsisType
@@ -10,7 +11,13 @@ from runsmith.errors import InvalidStateMachineError, InvalidTransitionError
 TState = TypeVar("TState", bound=str)
 TEvent = TypeVar("TEvent", bound=str)
 
-TransitionTable = dict[TState, dict[TEvent, TState] | EllipsisType]
+
+class Terminal(enum.Enum):
+    OK = "ok"
+    ERROR = "error"
+
+
+TransitionTable = dict[TState, dict[TEvent, TState] | Terminal]
 
 
 class IPrettyPrinter(Protocol):
@@ -28,7 +35,7 @@ class StateMachine(Generic[TState, TEvent]):
         self._transitions: TransitionTable[TState, TEvent] = copy.deepcopy(transitions)
         self._initial_state: TState | None = None
         self._initial_event = initial_event
-        self._terminal_states: set[TState] = set()
+        self._terminal_outcomes: dict[TState, Terminal] = {}
         self._constraints: tuple[Timeout, ...] = tuple(constraints)
 
         # Parse the state machine
@@ -69,7 +76,13 @@ class StateMachine(Generic[TState, TEvent]):
         initial_states = set(self._transitions.keys())
         for src_state, trans in self._transitions.items():
             if isinstance(trans, EllipsisType):
-                self._terminal_states.add(src_state)
+                raise InvalidStateMachineError(
+                    f"Terminal state [{src_state}] uses deprecated Ellipsis (...). "
+                    "Use Terminal.OK or Terminal.ERROR instead."
+                )
+
+            if isinstance(trans, Terminal):
+                self._terminal_outcomes[src_state] = trans
                 continue
 
             for _, tgt_state in trans.items():
@@ -82,7 +95,7 @@ class StateMachine(Generic[TState, TEvent]):
 
         self._initial_state = next(iter(initial_states))
 
-        if not self._terminal_states:
+        if not self._terminal_outcomes:
             raise InvalidStateMachineError("No terminal states found")
 
     def get_initial_state(self) -> TState:
@@ -93,7 +106,10 @@ class StateMachine(Generic[TState, TEvent]):
         return self._initial_event
 
     def get_terminal_states(self) -> set[TState]:
-        return self._terminal_states
+        return set(self._terminal_outcomes)
+
+    def get_terminal_outcome(self, state: TState) -> Terminal | None:
+        return self._terminal_outcomes.get(state)
 
     def get_transitions(self) -> TransitionTable[TState, TEvent]:
         return self._transitions
@@ -102,7 +118,7 @@ class StateMachine(Generic[TState, TEvent]):
         return self._constraints
 
     def get_target_state(self, state: TState, event: TEvent) -> TState:
-        if state in self._terminal_states:
+        if state in self._terminal_outcomes:
             raise InvalidTransitionError(state, event)
 
         try:

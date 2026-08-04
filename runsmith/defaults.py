@@ -1,23 +1,23 @@
 from collections.abc import Iterable
-from types import EllipsisType
 from typing import Literal, TextIO
 
 from runsmith.constraints import HeartbeatTimeout, StateTimeout, Timeout, TransitionTimeout
-from runsmith.state import StateMachine, TransitionTable
+from runsmith.state import StateMachine, Terminal, TransitionTable
 
 DefaultWorkerState = Literal["idle", "starting", "running", "terminating", "crashed", "stopped"]
-DefaultWorkerEvent = Literal["start", "run", "terminate", "complete", "error"]
+DefaultWorkerEvent = Literal["start", "run", "complete", "error"]
 
 
 DefaultTransitionTable: TransitionTable[DefaultWorkerState, DefaultWorkerEvent] = {
     "idle": {"start": "starting"},
     "starting": {"run": "running", "error": "crashed"},
-    "running": {"terminate": "terminating", "error": "crashed"},
+    "running": {"complete": "terminating", "error": "crashed"},
     "terminating": {"complete": "stopped", "error": "crashed"},
-    "crashed": ...,
-    "stopped": ...,
+    "crashed": Terminal.ERROR,
+    "stopped": Terminal.OK,
 }
 
+# ---- Worker
 DefaultWorkerConstraints: Iterable[Timeout] = [
     # Actor liveness
     HeartbeatTimeout(timeout=2, when="running"),
@@ -31,11 +31,40 @@ DefaultWorkerConstraints: Iterable[Timeout] = [
     StateTimeout(timeout=10, when="terminating"),
 ]
 
-
 DefaultWorkerFSM = StateMachine[DefaultWorkerState, DefaultWorkerEvent](
     transitions=DefaultTransitionTable,
     initial_event="start",
     constraints=DefaultWorkerConstraints,
+)
+
+# ---- Supervisor
+# Supervisors may own a subtree, so they get one extra state: a failing supervisor must reap its
+# children before crashing to avoid orphan children.
+SupervisorState = DefaultWorkerState | Literal["reaping"]
+
+SupervisorTransitionTable: TransitionTable[SupervisorState, DefaultWorkerEvent] = {
+    "idle": {"start": "starting"},
+    "starting": {"run": "running", "error": "crashed"},
+    "running": {"complete": "terminating", "error": "reaping"},
+    "reaping": {"complete": "crashed", "error": "crashed"},
+    "terminating": {"complete": "stopped", "error": "crashed"},
+    "crashed": Terminal.ERROR,
+    "stopped": Terminal.OK,
+}
+
+
+SupervisorConstraints: Iterable[Timeout] = [
+    *DefaultWorkerConstraints,
+    TransitionTimeout(timeout=1, when="running -> reaping"),
+    TransitionTimeout(timeout=1, when="reaping -> crashed"),
+    StateTimeout(timeout=10, when="reaping"),
+]
+
+
+SupervisorFSM = StateMachine[SupervisorState, DefaultWorkerEvent](
+    transitions=SupervisorTransitionTable,
+    initial_event="start",
+    constraints=SupervisorConstraints,
 )
 
 
@@ -48,7 +77,7 @@ class DefaultFSNPrettyPrinter:
         names: set = set()
         for source, row in self.fsm.get_transitions().items():
             names.add(source)
-            if isinstance(row, EllipsisType):
+            if isinstance(row, Terminal):
                 continue
             names.update(row.values())  # pyright: ignore[reportAttributeAccessIssue]
         return names
@@ -84,7 +113,7 @@ class DefaultFSNPrettyPrinter:
         → idle  (initial)
               start → starting
 
-          crashed  (terminal)
+          crashed  (terminal, error)
 
           running  (keepalive=2)
               error → crashed
@@ -107,18 +136,20 @@ class DefaultFSNPrettyPrinter:
             if lines:
                 lines.append("")
 
-            prefix = "→ " if state == initial else "  "
+            outcome = self.fsm.get_terminal_outcome(state)
             tags = (
                 (["initial"] if state == initial else [])
-                + (["terminal"] if state in self.fsm.get_terminal_states() else [])
+                + (["terminal"] if outcome is not None else [])
+                + (["error"] if outcome is Terminal.ERROR else [])
                 + ([f"keepalive={keepalives[state]}"] if state in keepalives else [])
                 + ([f"state_timeout={state_timeouts[state]}"] if state in state_timeouts else [])
             )
+            prefix = "→ " if state == initial else "  "
             suffix = f"  ({', '.join(tags)})" if tags else ""
             lines.append(f"{prefix}{state}{suffix}")
 
             row = self.fsm.get_transitions().get(state)
-            if row is None or isinstance(row, EllipsisType):
+            if row is None or isinstance(row, Terminal):
                 continue
             for event in sorted(row, key=str):
                 target = row[event]

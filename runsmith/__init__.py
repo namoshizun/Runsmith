@@ -6,16 +6,23 @@ from runsmith.defaults import (
     DefaultWorkerEvent,
     DefaultWorkerFSM,
     DefaultWorkerState,
+    SupervisorConstraints,
+    SupervisorFSM,
+    SupervisorState,
+    SupervisorTransitionTable,
 )
-from runsmith.state import StateMachine, TransitionTable
+from runsmith.state import StateMachine, Terminal, TransitionTable
 from runsmith.supervisor import AsyncSupervisor, SyncSupervisor
 from runsmith.worker import AsyncWorker, SyncWorker, WorkerActivity
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = [
     "AsyncSupervisor",
     "AsyncWorker",
+    "SupervisorConstraints",
+    "SupervisorFSM",
+    "SupervisorState",
     "DefaultTransitionTable",
     "DefaultWorkerConstraints",
     "DefaultWorkerEvent",
@@ -24,8 +31,10 @@ __all__ = [
     "HeartbeatTimeout",
     "StateMachine",
     "StateTimeout",
+    "SupervisorTransitionTable",
     "SyncSupervisor",
     "SyncWorker",
+    "Terminal",
     "Timeout",
     "TransitionTable",
     "TransitionTimeout",

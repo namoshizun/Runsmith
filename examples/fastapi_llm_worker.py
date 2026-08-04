@@ -34,7 +34,7 @@ class LLMWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     def handle_llm_request(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
 
         try:
             self.request_queue.get(timeout=0.1)
@@ -131,7 +131,7 @@ class FastAPIWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     def check_app_health(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
 
         self.heartbeat_evt.clear()
         if self.heartbeat_evt.wait(timeout=10) and self._thread and self._thread.is_alive():

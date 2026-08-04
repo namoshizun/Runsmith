@@ -1,5 +1,16 @@
 # Examples
 
+## Proactively completing worker
+
+Workers are not required to wait for a global stop signal. A worker with finite work may transition out of `running` on its own; once it reaches a `Terminal.OK` state, the supervisor retires it. When every supervised unit has retired, `supervisor.run()` returns.
+
+```{eval-rst}
+.. dropdown:: Example source: ``examples/one_shot_worker.py``
+
+   .. literalinclude:: ../../examples/one_shot_worker.py
+      :language: python
+```
+
 ## Incorporative Worker
 
 This example shows a `ReluctantWorker` whose `running` actor never checks `self.ctx.cmd == "stop"`. It never initiates the `running → terminating` transition.

@@ -32,10 +32,10 @@ def post(src: str, event: str):
     return decor
 
 
-def actor(state: str):
+def actor(state: str, min_interval: float | int | None = None):
     """Registers a generator method as the activity handler for `state`."""
 
     def decor(func: Callable[_P, _R]) -> Callable[_P, _R]:
-        return _attach_hook(func, ("actor", state))
+        return _attach_hook(func, ("actor", state, min_interval))
 
     return decor

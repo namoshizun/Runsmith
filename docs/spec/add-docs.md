@@ -94,7 +94,7 @@ class SleepySyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     def work(self):
         # Honor the supervisor's stop signal
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
         time.sleep(1)
         return self.emit("keepalive")
 
@@ -146,7 +146,7 @@ class SleepyAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
     @actor("running")
     async def work(self):
         if self.ctx.cmd == "stop":
-            return self.emit("terminate")
+            return self.emit("complete")
         await asyncio.sleep(1)
         return self.emit("keepalive")
 
@@ -206,12 +206,12 @@ Call out:
 
 #### Custom FSMs
 
-Explain: Workers default to `DefaultWorkerFSM` (idle → starting → running → terminating → stopped), but any lifecycle can be modeled. Define your own `StateMachine` using a `TransitionTable` — a dict mapping each source state to `{event: target_state}`, or `...` (Ellipsis) to mark it as a terminal state.
+Explain: Workers default to `DefaultWorkerFSM` (idle → starting → running → terminating → stopped), but any lifecycle can be modeled. Define your own `StateMachine` using a `TransitionTable` — a dict mapping each source state to `{event: target_state}`, or `Terminal.OK` / `Terminal.ERROR` to mark it as a terminal state.
 
 ```python
 from typing import Literal
 from runsmith.constraints import HeartbeatTimeout, StateTimeout
-from runsmith.state import StateMachine, TransitionTable
+from runsmith.state import StateMachine, Terminal, TransitionTable
 
 WorkerState = Literal["idle", "warming", "processing", "cleanup", "crashed", "stopped"]
 WorkerEvent = Literal["preload", "start", "stop", "complete", "error"]
@@ -221,8 +221,8 @@ WorkerTransitionTable: TransitionTable[WorkerState, WorkerEvent] = {
     "warming":    {"start": "processing", "error": "crashed"},
     "processing": {"stop": "cleanup",     "error": "crashed"},
     "cleanup":    {"complete": "stopped", "error": "crashed"},
-    "crashed": ...,
-    "stopped": ...,
+    "crashed": Terminal.ERROR,
+    "stopped": Terminal.OK,
 }
 
 WorkerFSM = StateMachine[WorkerState, WorkerEvent](
@@ -243,7 +243,8 @@ supervisor.register_workers(MyWorker("w1", fsm=WorkerFSM))
 
 Rules for a valid `StateMachine` (surface as a note/admonition):
 - Exactly one state must have no incoming transitions (the initial state, derived automatically).
-- At least one terminal state (`...`) must be declared.
+- At least one terminal state (`Terminal.OK` or `Terminal.ERROR`) must be declared.
+- `Terminal.OK` means successful completion; `Terminal.ERROR` means failure and triggers restart.
 - `initial_event` must be a valid outgoing event from the initial state.
 - All constraint `when` fields must reference states or transitions that exist in the table.
 

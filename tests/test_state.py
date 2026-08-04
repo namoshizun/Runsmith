@@ -4,12 +4,12 @@ import pytest
 
 from runsmith.constraints import HeartbeatTimeout, StateTimeout, TransitionTimeout
 from runsmith.errors import InvalidStateMachineError, InvalidTransitionError
-from runsmith.state import StateMachine
+from runsmith.state import StateMachine, Terminal
 
 
 def _simple_fsm() -> StateMachine:
     return StateMachine(
-        transitions={"idle": {"go": "done"}, "done": ...},
+        transitions={"idle": {"go": "done"}, "done": Terminal.OK},
         initial_event="go",
     )
 
@@ -19,19 +19,42 @@ def test_fsm_identifies_initial_and_terminal_states() -> None:
     assert fsm.get_initial_state() == "idle"
     assert fsm.get_terminal_states() == {"done"}
     assert fsm.get_initial_event() == "go"
+    assert fsm.get_terminal_outcome("done") is Terminal.OK
+
+
+def test_fsm_identifies_error_terminal_outcome() -> None:
+    fsm = StateMachine(
+        transitions={
+            "idle": {"go": "done", "fail": "crashed"},
+            "done": Terminal.OK,
+            "crashed": Terminal.ERROR,
+        },
+        initial_event="go",
+    )
+    assert fsm.get_terminal_outcome("crashed") is Terminal.ERROR
+    assert fsm.get_terminal_outcome("done") is Terminal.OK
+    assert fsm.get_terminal_outcome("idle") is None
+
+
+def test_fsm_rejects_deprecated_ellipsis_terminal_marker() -> None:
+    with pytest.raises(InvalidStateMachineError, match="Terminal.OK or Terminal.ERROR"):
+        StateMachine(
+            transitions={"idle": {"go": "done"}, "done": ...},
+            initial_event="go",
+        )
 
 
 def test_fsm_raises_when_multiple_initial_states() -> None:
     # Both "a" and "b" are never targets, so two initial states exist.
     with pytest.raises(InvalidStateMachineError, match="exactly one initial state"):
         StateMachine(
-            transitions={"a": {"x": "c"}, "b": {"y": "c"}, "c": ...},
+            transitions={"a": {"x": "c"}, "b": {"y": "c"}, "c": Terminal.OK},
             initial_event="x",
         )
 
 
 def test_fsm_raises_when_no_terminal_states() -> None:
-    # Exactly one initial state ("idle"), but "running" loops back — no `...` entry.
+    # Exactly one initial state ("idle"), but "running" loops back — no terminal marker.
     with pytest.raises(InvalidStateMachineError, match="No terminal states"):
         StateMachine(
             transitions={"idle": {"start": "running"}, "running": {"keep": "running"}},
@@ -42,7 +65,7 @@ def test_fsm_raises_when_no_terminal_states() -> None:
 def test_fsm_raises_on_invalid_initial_event() -> None:
     with pytest.raises(ValueError, match="Invalid initial event"):
         StateMachine(
-            transitions={"idle": {"go": "done"}, "done": ...},
+            transitions={"idle": {"go": "done"}, "done": Terminal.OK},
             initial_event="nonexistent",
         )
 
@@ -77,7 +100,7 @@ def test_get_events_returns_transitions_for_non_terminal_state() -> None:
 def test_get_constraints_returns_registered_constraints() -> None:
     c = HeartbeatTimeout(timeout=2, when="idle")
     fsm = StateMachine(
-        transitions={"idle": {"go": "done"}, "done": ...},
+        transitions={"idle": {"go": "done"}, "done": Terminal.OK},
         initial_event="go",
         constraints=[c],
     )
@@ -87,7 +110,7 @@ def test_get_constraints_returns_registered_constraints() -> None:
 def test_constraint_validation_heartbeat_on_unknown_state() -> None:
     with pytest.raises(ValueError, match="Heartbeat timeout for unknown state"):
         StateMachine(
-            transitions={"idle": {"go": "done"}, "done": ...},
+            transitions={"idle": {"go": "done"}, "done": Terminal.OK},
             initial_event="go",
             constraints=[HeartbeatTimeout(timeout=1, when="ghost")],
         )
@@ -96,7 +119,7 @@ def test_constraint_validation_heartbeat_on_unknown_state() -> None:
 def test_constraint_validation_state_timeout_on_unknown_state() -> None:
     with pytest.raises(ValueError, match="State timeout for unknown state"):
         StateMachine(
-            transitions={"idle": {"go": "done"}, "done": ...},
+            transitions={"idle": {"go": "done"}, "done": Terminal.OK},
             initial_event="go",
             constraints=[StateTimeout(timeout=1, when="ghost")],
         )
@@ -105,7 +128,7 @@ def test_constraint_validation_state_timeout_on_unknown_state() -> None:
 def test_constraint_validation_transition_timeout_invalid_edge() -> None:
     with pytest.raises(ValueError, match="Invalid transition options"):
         StateMachine(
-            transitions={"idle": {"go": "done"}, "done": ...},
+            transitions={"idle": {"go": "done"}, "done": Terminal.OK},
             initial_event="go",
             constraints=[TransitionTimeout(timeout=1, when="idle -> ghost")],
         )
