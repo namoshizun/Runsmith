@@ -1,7 +1,7 @@
 ## Changelog
 
 
-### 1.2.0
+### 1.2.0 (2026-08-04)
 
 **Breaking changes**:
 
@@ -13,7 +13,7 @@
 - fix: escalate restart-quota exhaustion to `crashed` so nested parents restart failed children
   supervisors
 
-### 1.1.0
+### 1.1.0 (2026-04-25)
 
 - fix: async supervision did not check executor liveness
 - feat: add best-effort thread killing mechanism

@@ -12,3 +12,4 @@
 ## Tooling
 - Use loguru instead of the builtin logging module
 - Write all Python tests as `pytest` style functions, not `unittest` classes.
+- Build docs with: `uv run --group docs sphinx-build -E -b html docs/source docs/_build/html`
