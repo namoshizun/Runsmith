@@ -115,10 +115,10 @@ class ActorFunction(Generic[TEvent]):
             return self._invoke(sleep_for)
         return self._ainvoke(sleep_for)
 
-_EXCLUDED_INIT_PARAMS = frozenset({"self", "name", "fsm"})
-
 
 class _WorkerMeta(abc.ABCMeta):
+    exclude_init_params = frozenset({"self", "name", "fsm"})
+
     def __new__(
         mcls,
         name: str,
@@ -136,12 +136,13 @@ class _WorkerMeta(abc.ABCMeta):
 
             # Per the decorated hook method
             for hook in getattr(_attr, HOOK_ATTR, ()):
+                exec_mode = getattr(cls, "execution_mode")
                 # Ensure the hook function is compatible with the worker's execution mode
-                if getattr(cls, "execution_mode") == "sync" and is_coro:
+                if exec_mode == "sync" and is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is an async hook but the worker is a sync worker"
                     )
-                if getattr(cls, "execution_mode") == "async" and not is_coro:
+                if exec_mode == "async" and not is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is a sync hook but the worker is an async worker"
                     )
@@ -165,11 +166,11 @@ class _WorkerMeta(abc.ABCMeta):
         bound.apply_defaults()
         meta: dict[str, object] = {}
         for key, value in bound.arguments.items():
-            if key in _EXCLUDED_INIT_PARAMS:
+            if key in cls.exclude_init_params:
                 continue
             param = sig.parameters[key]
             if param.kind is inspect.Parameter.VAR_KEYWORD:
-                meta.update({k: v for k, v in value.items() if k not in _EXCLUDED_INIT_PARAMS})
+                meta.update({k: v for k, v in value.items() if k not in cls.exclude_init_params})
             elif param.kind is not inspect.Parameter.VAR_POSITIONAL:
                 meta[key] = value
         instance._meta = meta
