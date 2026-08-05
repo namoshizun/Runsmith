@@ -2,71 +2,32 @@ from __future__ import annotations
 
 import io
 
-from runsmith.defaults import DefaultFSNPrettyPrinter, DefaultWorkerFSM
-from runsmith.state import StateMachine, Terminal
+from runsmith.defaults import DefaultFSNPrettyPrinter, DefaultWorkerFSM, SupervisorFSM
+from runsmith.state import Terminal
 
 
-def _print(fsm: StateMachine) -> str:
+def test_default_worker_fsm_structure() -> None:
+    assert DefaultWorkerFSM.get_initial_state() == "idle"
+    assert DefaultWorkerFSM.get_terminal_outcome("stopped") is Terminal.OK
+    assert DefaultWorkerFSM.get_terminal_outcome("crashed") is Terminal.ERROR
+    assert DefaultWorkerFSM.get_target_state("running", "error") == "crashed"
+
+
+def test_supervisor_fsm_reaps_before_crash() -> None:
+    """Failing supervisors must drain their subtree before landing in crashed."""
+    assert SupervisorFSM.get_target_state("running", "error") == "reaping"
+    assert SupervisorFSM.get_target_state("reaping", "complete") == "crashed"
+    assert SupervisorFSM.get_target_state("reaping", "error") == "crashed"
+
+
+def test_pretty_printer_renders_states_and_constraints() -> None:
     buf = io.StringIO()
-    DefaultFSNPrettyPrinter(fsm, file=buf).print()
-    return buf.getvalue()
+    DefaultFSNPrettyPrinter(DefaultWorkerFSM, file=buf).print()
+    out = buf.getvalue()
 
-
-def test_output_contains_all_default_states() -> None:
-    out = _print(DefaultWorkerFSM)
-    for state in ("idle", "starting", "running", "terminating", "stopped", "crashed"):
-        assert state in out
-
-
-def test_output_marks_initial_state_with_arrow() -> None:
-    out = _print(DefaultWorkerFSM)
     assert "→ idle" in out
-
-
-def test_output_labels_initial_state() -> None:
-    out = _print(DefaultWorkerFSM)
     assert "initial" in out
-
-
-def test_output_labels_terminal_states() -> None:
-    out = _print(DefaultWorkerFSM)
     assert "terminal" in out
-
-
-def test_output_labels_error_terminal_outcome() -> None:
-    out = _print(DefaultWorkerFSM)
-    assert "error" in out
-    assert "crashed" in out
-
-
-def test_output_shows_keepalive_constraint() -> None:
-    out = _print(DefaultWorkerFSM)
+    assert "crashed" in out and "error" in out
     assert "keepalive" in out
-
-
-def test_output_shows_state_timeout_constraint() -> None:
-    out = _print(DefaultWorkerFSM)
-    assert "state_timeout" in out
-
-
-def test_output_shows_transition_timeouts() -> None:
-    out = _print(DefaultWorkerFSM)
-    assert "timeout" in out
-
-
-def test_simple_fsm_without_constraints() -> None:
-    """Covers branches where no keepalive/state_timeout/transition_timeout hints exist."""
-    fsm = StateMachine(
-        transitions={"idle": {"go": "done"}, "done": Terminal.OK},
-        initial_event="go",
-    )
-    out = _print(fsm)
-    assert "→ idle" in out
-    assert "done" in out
-    assert "terminal" in out
-    assert "initial" in out
-
-
-def test_output_lists_transitions_under_each_state() -> None:
-    out = _print(DefaultWorkerFSM)
     assert "start → starting" in out

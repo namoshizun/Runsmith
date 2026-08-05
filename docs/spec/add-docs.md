@@ -359,7 +359,7 @@ Runsmith reads configuration from environment variables prefixed with `RUNSMITH_
 | `supervision_interval`              | `0.25`  | `RUNSMITH_SUPERVISION_INTERVAL`              | Seconds between supervisor health-check cycles.                              |
 | `worker_restart_quota`              | `3`     | `RUNSMITH_WORKER_RESTART_QUOTA`              | Max restarts for a leaf worker before the supervisor gives up and escalates. |
 | `supervisor_restart_quota`          | `3`     | `RUNSMITH_SUPERVISOR_RESTART_QUOTA`          | Max restarts for a child supervisor node.                                    |
-| `activity_queue_maxsize`            | `100`   | `RUNSMITH_ACTIVITY_QUEUE_MAXSIZE`            | Max buffered `WorkerActivity` events in the shared queue.                    |
+| `activity_queue_maxsize`            | `100`   | `RUNSMITH_ACTIVITY_QUEUE_MAXSIZE`            | Max buffered `WorkerActivity` events; producers block when full (0 = unbounded). |
 | `activity_callback_task_queue_size` | `16`    | `RUNSMITH_ACTIVITY_CALLBACK_TASK_QUEUE_SIZE` | Max concurrent `on_activity` coroutine tasks in async mode.                  |
 
 Show a quick environment-variable example:

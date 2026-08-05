@@ -1,5 +1,12 @@
 ## Changelog
 
+### 1.2.1 (2026-08-05)
+
+- feat: activity queue now applies backpressure — executors block on a full queue
+- fix: cap each supervision-tick drain pass so a chatty worker won't starve the supervision loop
+- fix: suppress asyncio "task exception was never retrieved" noise for crashed async workers
+- fix: fence worker activities by generation to prevent ingesting stale activities from dead workers
+- misc: slim test suite, add more critical tests.
 
 ### 1.2.0 (2026-08-04)
 

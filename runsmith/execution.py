@@ -7,7 +7,7 @@ from typing import Any, Protocol, TypeVar
 
 from loguru import logger
 
-from runsmith.core import EXIT_SIGNALS, IEvent, IQueue
+from runsmith.core import EXIT_SIGNALS, IAsyncQueue, IBlockingQueue, IEvent
 from runsmith.utils import kill_thread
 from runsmith.worker import (
     AsyncWorker,
@@ -27,7 +27,7 @@ class IExecutor(Protocol[WorkerT]):
     @property
     def name(self) -> str: ...
     @property
-    def activity_queue(self) -> IQueue[WorkerActivity]: ...
+    def activity_queue(self) -> IBlockingQueue[WorkerActivity] | IAsyncQueue[WorkerActivity]: ...
     @property
     def term_event(self) -> IEvent: ...
 
@@ -84,7 +84,7 @@ class ThreadExecutor(threading.Thread):
         self,
         worker: SyncWorker,
         term_event: IEvent,
-        activity_queue: IQueue[WorkerActivity],
+        activity_queue: IBlockingQueue[WorkerActivity],
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -96,7 +96,7 @@ class ThreadExecutor(threading.Thread):
 
     def run(self):
         for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
-            self.activity_queue.put_nowait(activity)
+            self.activity_queue.put(activity)
 
     def stop(self):
         self.term_event.set()
@@ -120,7 +120,7 @@ class ProcessExecutor(multiprocessing.Process):
         self,
         worker: SyncWorker,
         term_event: IEvent,
-        activity_queue: IQueue[WorkerActivity],
+        activity_queue: IBlockingQueue[WorkerActivity],
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -136,7 +136,7 @@ class ProcessExecutor(multiprocessing.Process):
             signal.signal(sig, signal.Handlers.SIG_IGN)
 
         for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
-            self.activity_queue.put_nowait(activity)
+            self.activity_queue.put(activity)
 
     def stop(self):
         self.term_event.set()
@@ -147,7 +147,7 @@ class CoroutineExecutor:
         self,
         worker: AsyncWorker,
         term_event: IEvent,
-        activity_queue: IQueue[WorkerActivity],
+        activity_queue: IAsyncQueue[WorkerActivity],
     ):
         self.worker = worker
         self.name = worker.name
@@ -157,10 +157,18 @@ class CoroutineExecutor:
 
     async def _task(self):
         async for activity in drive_async_worker(self.worker.main_loop(), self.term_event):
-            self.activity_queue.put_nowait(activity)
+            await self.activity_queue.put(activity)
+
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+
+        if exception := task.exception():
+            logger.opt(exception=exception).debug(f"Coroutine worker [{self.name}] crashed")
 
     def start(self):
         self.__task = asyncio.create_task(self._task(), name=self.worker.name)
+        self.__task.add_done_callback(self._on_task_done)
 
     def is_alive(self) -> bool:
         if not self.__task:

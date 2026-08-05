@@ -150,7 +150,7 @@ supervisor_loop(["foo", "bar"])
 
 ## Supervise async workers
 
-Async workers subclass `AsyncWorker[State, Event]` and implements asynchronous actors and hooks. `AsyncSupervisor` runs workers as asyncio tasks in one event loop; the API is otherwise the same.
+Async workers subclass `AsyncWorker[State, Event]` and implements asynchronous actors and hooks. `AsyncSupervisor` runs workers as asyncio tasks in one event loop, so please make sure your workers do not block the event loop; the API is otherwise the same.
 
 ```python
 import asyncio

@@ -120,7 +120,11 @@ class RunsmithSettings(Settings):
     activity_queue_maxsize: int = field(
         default=100,
         metadata={
-            "doc": "Maximum buffered WorkerActivity events in the shared queue.",
+            "doc": (
+                "Maximum buffered WorkerActivity events in the shared queue. "
+                "When full, producers block supervisor drains space. "
+                "Use 0 for an unbounded queue."
+            ),
             "group": "Activity pipeline capacity",
         },
     )

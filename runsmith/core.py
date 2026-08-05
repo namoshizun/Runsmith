@@ -21,15 +21,21 @@ class IEvent(Protocol):
     def is_set(self) -> bool: ...
 
 
-class IQueue(Protocol, Generic[T]):
-    """Structural type for queue-like objects used across threads or processes.
+class IBlockingQueue(Protocol, Generic[T]):
+    """Thread/process queue: blocking ``put``, non-blocking ``get_nowait``.
 
-    ``put_nowait`` / ``get_nowait`` are positional-only so implementations match
-    whether typeshed names the value parameter ``item`` (``queue.Queue``) or
-    ``obj`` (``multiprocessing.queues.Queue``).
+    Parameter names are positional-only so both ``queue.Queue`` (``item``) and
+    ``multiprocessing.Queue`` (``obj``) structurally match.
     """
 
-    def put_nowait(self, item: T, /) -> None: ...
+    def put(self, item: T, /) -> None: ...
+    def get_nowait(self, /) -> T: ...
+
+
+class IAsyncQueue(Protocol, Generic[T]):
+    """Asyncio queue: awaitable ``put``, non-blocking ``get_nowait``."""
+
+    async def put(self, item: T, /) -> None: ...
     def get_nowait(self, /) -> T: ...
 
 

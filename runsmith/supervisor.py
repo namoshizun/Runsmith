@@ -26,7 +26,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from runsmith.core import EXIT_SIGNALS, IQueue
+from runsmith.core import EXIT_SIGNALS, IAsyncQueue, IBlockingQueue
 from runsmith.decorators import actor, post
 from runsmith.evaluator import WorkerStatusEvaluator
 from runsmith.execution import (
@@ -87,42 +87,46 @@ class SupervisionUnit(Generic[WorkerT]):
 
 class SupervisorBase(Generic[WorkerT]):
     def __init__(self, executor_type: Literal["thread", "process", "coroutine"]):
-        self._activity_queue: IQueue[WorkerActivity] | None = None
+        self._activity_queue: (
+            IBlockingQueue[WorkerActivity] | IAsyncQueue[WorkerActivity] | None
+        ) = None
         self._worker_templates: dict[str, WorkerT] = dict()
         self.executor_type = executor_type
         self.units: dict[str, SupervisionUnit[WorkerT]] = dict()  # worker name => unit
 
     @property
-    def activity_queue(self) -> IQueue[WorkerActivity]:
+    def activity_queue(self) -> IBlockingQueue[WorkerActivity] | IAsyncQueue[WorkerActivity]:
         if self._activity_queue is None:
             raise RuntimeError("Activity queue not yet initialized")
         return self._activity_queue
 
-    def materialize_units(self, *, worker_name: str | None = None):
+    def materialize_units(self, *, worker_name: str | None = None, generation: int = 0):
         for worker in self._worker_templates.values():
             if worker_name and worker.name != worker_name:
                 continue
 
             # Build the executor
             _worker = worker.clone()
+            _worker.generation = generation
+            queue = self.activity_queue
             match self.executor_type:
                 case "thread":
                     _executor = ThreadExecutor(
                         worker=cast(SyncWorker, _worker),
                         term_event=threading.Event(),
-                        activity_queue=self.activity_queue,
+                        activity_queue=cast(IBlockingQueue[WorkerActivity], queue),
                     )
                 case "process":
                     _executor = ProcessExecutor(
                         worker=cast(SyncWorker, _worker),
                         term_event=multiprocessing.Event(),
-                        activity_queue=self.activity_queue,
+                        activity_queue=cast(IBlockingQueue[WorkerActivity], queue),
                     )
                 case "coroutine":
                     _executor = CoroutineExecutor(
                         worker=cast(AsyncWorker, _worker),
                         term_event=asyncio.Event(),
-                        activity_queue=self.activity_queue,
+                        activity_queue=cast(IAsyncQueue[WorkerActivity], queue),
                     )
                 case _:
                     raise ValueError(f"Invalid executor type: {self.executor_type}")
@@ -145,6 +149,7 @@ class SupervisorBase(Generic[WorkerT]):
 
         # Destroy the original unit
         restart_count = unit.restart_count + 1
+        next_generation = unit.worker.generation + 1
         logger.warning(f"Restarting crashed worker [{name}] for the {restart_count}th time...")
 
         if unit.executor.is_alive():
@@ -152,8 +157,9 @@ class SupervisorBase(Generic[WorkerT]):
 
         del self.units[name]
 
-        # Replace it with the new unit
-        self.materialize_units(worker_name=name)
+        # Replace it with the new unit under a fresh generation so in-flight
+        # activities from the killed executor cannot poison the new evaluator.
+        self.materialize_units(worker_name=name, generation=next_generation)
         unit = self.units[name]
         unit.restart_count = restart_count
         unit.executor.start()
@@ -177,16 +183,27 @@ class SupervisorBase(Generic[WorkerT]):
                 executor.kill()
 
     def drain_activity_queue(self):
+        # Cap each pass so a chatty producer cannot starve the rest of the tick.
+        drained, budget = 0, settings.activity_queue_maxsize
         while True:
+            if budget and drained >= budget:
+                return
+
             try:
                 activity = self.activity_queue.get_nowait()
             except (Empty, asyncio.QueueEmpty):
                 return
 
-            if unit := self.units.get(activity.worker_name):
-                unit.evaluator.record(activity)
-            else:
+            drained += 1
+            if not (unit := self.units.get(activity.worker_name)):
                 logger.warning(f"Received activity from unknown worker: {activity}")
+                continue
+
+            if activity.generation != unit.worker.generation:
+                # Prior incarnation — expected after kill/restart; drop it.
+                continue
+
+            unit.evaluator.record(activity)
 
     @property
     def all_units_retired(self) -> bool:

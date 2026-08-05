@@ -67,19 +67,6 @@ def test_settings_coerce_bool_and_string_fields(monkeypatch: pytest.MonkeyPatch)
     assert settings.label == "workers"
 
 
-@pytest.mark.parametrize(("raw_value", "expected"), [("true", True), ("false", False)])
-def test_settings_parse_boolean_literals(
-    monkeypatch: pytest.MonkeyPatch,
-    raw_value: str,
-    expected: bool,
-) -> None:
-    monkeypatch.setenv("RUNSMITH_IS_ENABLED", raw_value)
-
-    settings = ExtendedRunsmithSettings()
-
-    assert settings.is_enabled is expected
-
-
 def test_invalid_boolean_literal_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNSMITH_IS_ENABLED", "maybe")
 

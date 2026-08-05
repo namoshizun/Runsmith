@@ -45,6 +45,7 @@ AsyncActorFunc = Callable[[], Awaitable[TEvent | Literal["keepalive"]]]
 class WorkerActivity:
     kind: Literal["transition_begin", "transition_end", "heartbeat"]
     worker_name: str
+    generation: int = 0  # incarnation id; fences activities across restarts
     transition: tuple[str, str, str] | None = None  # (src, event, tgt)
     timestamp: float = dataclasses.field(default_factory=_mono_now)
 
@@ -163,6 +164,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         self.fsm = copy.deepcopy(fsm)
         self.ctx: WorkerRunContext = WorkerRunContext()
         self._state: TState = self.fsm.get_initial_state()
+        self.generation: int = 0
 
     def before_exit(self, is_graceful: bool):
         logger.opt(colors=True).info(
@@ -213,7 +215,11 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
             return ActorFunction[TEvent](self.execution_mode, always=fallback_event)
 
     def make_activity(self, **kwargs: object) -> WorkerActivity:
-        return WorkerActivity(worker_name=self.name, **kwargs)  # pyright: ignore[reportArgumentType]
+        return WorkerActivity(
+            worker_name=self.name,
+            generation=self.generation,
+            **kwargs,  # pyright: ignore[reportArgumentType]
+        )
 
 
 class SyncWorker(WorkerBase[TState, TEvent]):
