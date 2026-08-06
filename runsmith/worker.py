@@ -8,7 +8,7 @@ import inspect
 import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
-from functools import cache
+from functools import cache, wraps
 from typing import Any, ClassVar, Generic, Literal, cast, overload
 
 from loguru import logger
@@ -55,7 +55,9 @@ class _HooksMap:
     pre: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
     post: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
     # state => (method name, min_interval)
-    actors: dict[str, tuple[str, float | int | None]] = dataclasses.field(default_factory=dict)
+    actors: dict[str, tuple[str, float | int | None]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 SyncWorkerLoop = Generator[WorkerActivity, ExecutorCommand, None]
@@ -116,38 +118,50 @@ class ActorFunction(Generic[TEvent]):
         return self._ainvoke(sleep_for)
 
 
-class _WorkerMeta(abc.ABCMeta):
-    exclude_init_params = frozenset({"self", "name", "fsm"})
+def _collect_init_meta(
+    init: Callable[..., Any],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    exclude: frozenset[str],
+) -> dict[str, object]:
+    sig = inspect.signature(init)
+    bound = sig.bind(None, *args, **kwargs)
+    bound.apply_defaults()
+    meta: dict[str, object] = {}
+    for key, value in bound.arguments.items():
+        if key in exclude:
+            continue
+        param = sig.parameters[key]
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            meta.update({k: v for k, v in value.items() if k not in exclude})
+        elif param.kind is not inspect.Parameter.VAR_POSITIONAL:
+            meta[key] = value
+    return meta
 
-    def __new__(
-        mcls,
-        name: str,
-        bases: tuple[type, ...],
-        namespace: dict[str, object],
-        **kwargs: object,
-    ):
-        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
-        if name == "WorkerBase":
-            return cls
+
+class WorkerBase(abc.ABC, Generic[TState, TEvent]):
+    _hooks: ClassVar[_HooksMap]
+    _default_init_params: ClassVar[frozenset[str]] = frozenset({"self", "name", "fsm"})
+    execution_mode: ClassVar[Literal["sync", "async"]]
+
+    def __init_subclass__(cls, **kwargs: object):
+        super().__init_subclass__(**kwargs)
 
         hooks = copy.deepcopy(getattr(cls, "_hooks", _HooksMap()))
         for _attr in vars(cls).values():
             is_coro = inspect.iscoroutinefunction(_attr)
 
-            # Per the decorated hook method
             for hook in getattr(_attr, HOOK_ATTR, ()):
-                exec_mode = getattr(cls, "execution_mode")
                 # Ensure the hook function is compatible with the worker's execution mode
-                if exec_mode == "sync" and is_coro:
+                if cls.execution_mode == "sync" and is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is an async hook but the worker is a sync worker"
                     )
-                if exec_mode == "async" and not is_coro:
+                if cls.execution_mode == "async" and not is_coro:
                     raise InvalidHookFunctionTypeError(
                         f"{cls.__name__}.{_attr.__name__} is a sync hook but the worker is an async worker"
                     )
 
-                # Register the hook function
                 match hook:
                     case ("pre", state, event):
                         hooks.pre.setdefault((state, event), []).append(_attr.__name__)
@@ -156,31 +170,22 @@ class _WorkerMeta(abc.ABCMeta):
                     case ("actor", state, min_interval):
                         hooks.actors[state] = (_attr.__name__, min_interval)
 
-        setattr(cls, "_hooks", hooks)
-        return cls
+        # ------------- newly added -------------
+        cls._hooks = hooks
 
-    def __call__(cls, *args: object, **kwargs: object):
-        instance = super().__call__(*args, **kwargs)
-        sig = inspect.signature(cls.__init__)
-        bound = sig.bind(None, *args, **kwargs)
-        bound.apply_defaults()
-        meta: dict[str, object] = {}
-        for key, value in bound.arguments.items():
-            if key in cls.exclude_init_params:
-                continue
-            param = sig.parameters[key]
-            if param.kind is inspect.Parameter.VAR_KEYWORD:
-                meta.update({k: v for k, v in value.items() if k not in cls.exclude_init_params})
-            elif param.kind is not inspect.Parameter.VAR_POSITIONAL:
-                meta[key] = value
-        instance._meta = meta
-        return instance
+        if "__init__" not in cls.__dict__:
+            return
 
+        orig_init = cls.__dict__["__init__"]
 
-class WorkerBase(abc.ABC, Generic[TState, TEvent], metaclass=_WorkerMeta):
-    _hooks: ClassVar[_HooksMap]
-    execution_mode: ClassVar[Literal["sync", "async"]]
-    _meta: dict[str, object]
+        @wraps(orig_init)
+        def wrapped_init(self: WorkerBase, *args: object, **kwargs: object) -> None:
+            orig_init(self, *args, **kwargs)
+            self._meta = _collect_init_meta(
+                orig_init, args, kwargs, cls._default_init_params
+            )
+
+        cls.__init__ = wrapped_init  # pyright: ignore[reportAttributeAccessIssue]
 
     def __init__(self, name: str, fsm: StateMachine[TState, TEvent] = DefaultWorkerFSM):
         self.name = name
@@ -188,6 +193,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent], metaclass=_WorkerMeta):
         self.ctx: WorkerRunContext = WorkerRunContext()
         self._state: TState = self.fsm.get_initial_state()
         self.generation: int = 0
+        self._meta = {}
 
     def before_exit(self, is_graceful: bool):
         logger.opt(colors=True).info(
@@ -202,7 +208,9 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent], metaclass=_WorkerMeta):
         )
         if accepts_fsm:
             kwargs["fsm"] = self.fsm
-        return self.__class__(name=self.name, **kwargs)  # pyright: ignore[reportArgumentType]
+        return self.__class__(
+            name=self.name, **kwargs
+        )  # pyright: ignore[reportArgumentType]
 
     def emit(self, signal: TEvent | Literal["keepalive"]):
         # A thin wrapper to make the typing work
@@ -221,7 +229,9 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent], metaclass=_WorkerMeta):
     @cache
     def get_actor_func(self, state: TState):
         if state == self.fsm.get_initial_state():
-            return ActorFunction[TEvent](self.execution_mode, always=self.fsm.get_initial_event())
+            return ActorFunction[TEvent](
+                self.execution_mode, always=self.fsm.get_initial_event()
+            )
 
         try:
             method_name, min_interval = self._hooks.actors[state]
@@ -277,7 +287,9 @@ class SyncWorker(WorkerBase[TState, TEvent]):
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
-                logger.info(f"State transition [{self.name}]: {src} -[{event}] -> {tgt}")
+                logger.info(
+                    f"State transition [{self.name}]: {src} -[{event}] -> {tgt}"
+                )
                 self.ctx.cmd = yield self.make_activity(
                     kind="transition_begin", transition=transition
                 )
@@ -328,7 +340,9 @@ class AsyncWorker(WorkerBase[TState, TEvent]):
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
-                logger.info(f"State transition [{self.name}]: {src} -[{event}] -> {tgt}")
+                logger.info(
+                    f"State transition [{self.name}]: {src} -[{event}] -> {tgt}"
+                )
                 self.ctx.cmd = yield self.make_activity(
                     kind="transition_begin", transition=transition
                 )
