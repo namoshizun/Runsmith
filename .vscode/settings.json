@@ -1,5 +1,4 @@
 {
-    "cSpell.words": [
-        "runsmith"
-    ]
+  "cSpell.words": ["runsmith"],
+  "python.defaultInterpreterPath": "./.venv/bin/python"
 }

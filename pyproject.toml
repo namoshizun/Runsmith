@@ -1,6 +1,6 @@
 [project]
 name = "runsmith"
-version = "1.2.1"
+version = "1.2.2"
 description = "Runsmith - A supervisor-tree framework for building resilient systems"
 readme = "README.md"
 license = "MIT"

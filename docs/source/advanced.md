@@ -116,19 +116,25 @@ Inside any `@actor`, `@pre`, or `@post` method, `self.ctx` exposes a `WorkerRunC
 
 ## Cloning workers for process execution
 
-When a supervisor uses `"process"` executors, workers are pickled across process boundaries. If your worker has required constructor arguments or external state, override `clone()` so restarts can rebuild it correctly.
+When a supervisor uses `"process"` executors, workers are cloned across process boundaries and on restart. Custom `__init__` arguments are captured automatically, so the default `clone()` can rebuild the worker without an override.
+
+Still override `clone()` when constructor args are not trivially copyable, or when construction involves extra pre/post-init work. A common case is preserving runtime progress that `__init__` alone cannot restore:
 
 ```python
-class QueueReaderWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
-    def __init__(self, name: str, queue: MPQueue):
+class LogTailWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    def __init__(self, name: str, path: str):
         super().__init__(name)
-        self.queue = queue
+        self.path = path
+        self.offset = 0
+        self._fh = open(path)
 
-    def clone(self) -> "QueueReaderWorker":
-        return QueueReaderWorker(name=self.name, queue=self.queue)
+    def clone(self) -> "LogTailWorker":
+        # Default clone would reopen at offset 0; keep the read position across restart.
+        twin = LogTailWorker(name=self.name, path=self.path)
+        twin.offset = self.offset
+        twin._fh.seek(self.offset)
+        return twin
 ```
-
-Override `clone()` only when you must copy state that is not a constructor argument.
 
 ## Activity callbacks
 

@@ -55,9 +55,7 @@ class _HooksMap:
     pre: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
     post: dict[tuple[str, str], list[str]] = dataclasses.field(default_factory=dict)
     # state => (method name, min_interval)
-    actors: dict[str, tuple[str, float | int | None]] = dataclasses.field(
-        default_factory=dict
-    )
+    actors: dict[str, tuple[str, float | int | None]] = dataclasses.field(default_factory=dict)
 
 
 SyncWorkerLoop = Generator[WorkerActivity, ExecutorCommand, None]
@@ -147,10 +145,12 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
     def __init_subclass__(cls, **kwargs: object):
         super().__init_subclass__(**kwargs)
 
+        # Initialize the hooks map
         hooks = copy.deepcopy(getattr(cls, "_hooks", _HooksMap()))
         for _attr in vars(cls).values():
             is_coro = inspect.iscoroutinefunction(_attr)
 
+            # Per the decorated hook method
             for hook in getattr(_attr, HOOK_ATTR, ()):
                 # Ensure the hook function is compatible with the worker's execution mode
                 if cls.execution_mode == "sync" and is_coro:
@@ -170,20 +170,18 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
                     case ("actor", state, min_interval):
                         hooks.actors[state] = (_attr.__name__, min_interval)
 
-        # ------------- newly added -------------
         cls._hooks = hooks
 
         if "__init__" not in cls.__dict__:
             return
 
+        # Collect concrete worker init params if the __init__ method is customized
         orig_init = cls.__dict__["__init__"]
 
         @wraps(orig_init)
         def wrapped_init(self: WorkerBase, *args: object, **kwargs: object) -> None:
             orig_init(self, *args, **kwargs)
-            self._meta = _collect_init_meta(
-                orig_init, args, kwargs, cls._default_init_params
-            )
+            self._meta = _collect_init_meta(orig_init, args, kwargs, cls._default_init_params)
 
         cls.__init__ = wrapped_init  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -208,9 +206,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         )
         if accepts_fsm:
             kwargs["fsm"] = self.fsm
-        return self.__class__(
-            name=self.name, **kwargs
-        )  # pyright: ignore[reportArgumentType]
+        return self.__class__(name=self.name, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def emit(self, signal: TEvent | Literal["keepalive"]):
         # A thin wrapper to make the typing work
@@ -229,9 +225,7 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
     @cache
     def get_actor_func(self, state: TState):
         if state == self.fsm.get_initial_state():
-            return ActorFunction[TEvent](
-                self.execution_mode, always=self.fsm.get_initial_event()
-            )
+            return ActorFunction[TEvent](self.execution_mode, always=self.fsm.get_initial_event())
 
         try:
             method_name, min_interval = self._hooks.actors[state]
@@ -287,9 +281,7 @@ class SyncWorker(WorkerBase[TState, TEvent]):
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
-                logger.info(
-                    f"State transition [{self.name}]: {src} -[{event}] -> {tgt}"
-                )
+                logger.info(f"State transition [{self.name}]: {src} -[{event}] -> {tgt}")
                 self.ctx.cmd = yield self.make_activity(
                     kind="transition_begin", transition=transition
                 )
@@ -340,9 +332,7 @@ class AsyncWorker(WorkerBase[TState, TEvent]):
                 src = self._state
                 tgt = self.fsm.get_target_state(src, event)
                 transition = (src, event, tgt)
-                logger.info(
-                    f"State transition [{self.name}]: {src} -[{event}] -> {tgt}"
-                )
+                logger.info(f"State transition [{self.name}]: {src} -[{event}] -> {tgt}")
                 self.ctx.cmd = yield self.make_activity(
                     kind="transition_begin", transition=transition
                 )

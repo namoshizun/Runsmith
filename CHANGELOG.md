@@ -1,5 +1,10 @@
 ## Changelog
 
+### 1.2.2 (2026-08-07)
+
+- feat: custom worker `__init__` args are captured automatically so `clone()` can rebuild the same instance (by [@Weibin74](https://github.com/Weibin74))
+  - **caveat**: still override `clone()` when args are not trivially copyable
+
 ### 1.2.1 (2026-08-05)
 
 - feat: activity queue now applies backpressure — executors block on a full queue
