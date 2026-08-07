@@ -209,3 +209,42 @@ def test_actor_functions_are_isolated_per_worker_instance() -> None:
     started = time.monotonic()
     left_actor()
     assert time.monotonic() - started >= 0.15
+
+
+# ── auto clone via _meta ──────────────────────────────────────────────────────
+
+
+def test_worker_clone_collects_init_kwargs_without_override() -> None:
+    class WorkerWithKwargs(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+        def __init__(self, name: str, queue: object, *, host: str = "localhost", **kwargs: object):
+            super().__init__(name, **kwargs)  # type: ignore[arg-type]
+            self.queue = queue
+            self.host = host
+
+    fsm = _custom_fsm()
+    worker = WorkerWithKwargs("w", "q", host="127.0.0.1", fsm=fsm)
+    assert worker._meta == {"queue": "q", "host": "127.0.0.1"}
+
+    cloned = worker.clone()
+    assert cloned is not worker
+    assert cloned.name == "w"
+    assert cloned.queue == "q"
+    assert cloned.host == "127.0.0.1"
+    assert cloned.fsm is not worker.fsm
+    assert cloned.fsm.get_initial_state() == worker.fsm.get_initial_state()
+
+
+def test_worker_clone_without_fsm_param() -> None:
+    class WorkerNoFsm(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+        def __init__(self, name: str, host: str, port: int):
+            super().__init__(name)
+            self.host = host
+            self.port = port
+
+    worker = WorkerNoFsm("w", "0.0.0.0", port=8050)
+    assert worker._meta == {"host": "0.0.0.0", "port": 8050}
+
+    cloned = worker.clone()
+    assert cloned.host == "0.0.0.0"
+    assert cloned.port == 8050
+    assert cloned.fsm is not worker.fsm
