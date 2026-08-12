@@ -114,11 +114,15 @@ Inside any `@actor`, `@pre`, or `@post` method, `self.ctx` exposes a `WorkerRunC
 | `history`   | `deque[tuple[str, str]]`   | Ring buffer (max 100) of recent transition tuples `(event, state)`.               |
 | `data`      | `Any`                      | Arbitrary worker-owned payload for carrying state across actor calls.             |
 
-## Cloning workers for process execution
+## When to override `clone()`
 
-When a supervisor uses `"process"` executors, workers are cloned across process boundaries and on restart. Custom `__init__` arguments are captured automatically, so the default `clone()` can rebuild the worker without an override.
+The supervisor always clones workers from the registered template when it starts or restarts them — for every executor type. Custom `__init__` arguments are captured automatically, so the default `clone()` can rebuild an equivalent instance without an override.
 
-Still override `clone()` when constructor args are not trivially copyable, or when construction involves extra pre/post-init work. A common case is preserving runtime progress that `__init__` alone cannot restore:
+**Override `clone()` only when constructor-arg replay is not enough**, for example when:
+
+- Constructor args are not trivially copyable (file handles, live connections, similar resources).
+- Construction involves extra pre/post-init work that `__init__` alone does not replay safely.
+- You must preserve runtime progress that was never a constructor argument.
 
 ```python
 class LogTailWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
