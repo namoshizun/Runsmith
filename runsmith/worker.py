@@ -8,7 +8,7 @@ import inspect
 import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
-from functools import cache, wraps
+from functools import wraps
 from typing import Any, ClassVar, Generic, Literal, cast, overload
 
 from loguru import logger
@@ -222,31 +222,37 @@ class WorkerBase(abc.ABC, Generic[TState, TEvent]):
         self: AsyncWorker[TState, TEvent], state: TState
     ) -> Callable[[], Awaitable[TEvent | Literal["keepalive"]]]: ...
 
-    @cache
     def get_actor_func(self, state: TState):
+        cache = self.__dict__.setdefault("_actor_funcs", {})  # pyright: ignore[reportAttributeAccessIssue]
+        if func := cache.get(state):
+            return func
+
         if state == self.fsm.get_initial_state():
-            return ActorFunction[TEvent](self.execution_mode, always=self.fsm.get_initial_event())
-
-        try:
-            method_name, min_interval = self._hooks.actors[state]
-            return ActorFunction[TEvent](
-                self.execution_mode,
-                cb=getattr(self, method_name),
-                min_interval=min_interval,
-            )
-        except (KeyError, AttributeError):
-            # Fall through to the default event if no actor registered
-            event_options = self.fsm.get_events(state)
-            if len(event_options) != 1:
-                raise RuntimeError(
-                    f"No actor registered for non-terminal state [{state}], no fallback event available"
+            func = ActorFunction[TEvent](self.execution_mode, always=self.fsm.get_initial_event())
+        else:
+            try:
+                method_name, min_interval = self._hooks.actors[state]
+                func = ActorFunction[TEvent](
+                    self.execution_mode,
+                    cb=getattr(self, method_name),
+                    min_interval=min_interval,
                 )
+            except (KeyError, AttributeError):
+                # Fall through to the default event if no actor registered
+                event_options = self.fsm.get_events(state)
+                if len(event_options) != 1:
+                    raise RuntimeError(
+                        f"No actor registered for non-terminal state [{state}], no fallback event available"
+                    )
 
-            fallback_event = event_options[0]
-            logger.warning(
-                f"No actor registered for non-terminal state [{state}], fallback to the default event [{fallback_event}]"
-            )
-            return ActorFunction[TEvent](self.execution_mode, always=fallback_event)
+                fallback_event = event_options[0]
+                logger.warning(
+                    f"No actor registered for non-terminal state [{state}], fallback to the default event [{fallback_event}]"
+                )
+                func = ActorFunction[TEvent](self.execution_mode, always=fallback_event)
+
+        cache[state] = func
+        return func
 
     def make_activity(self, **kwargs: object) -> WorkerActivity:
         return WorkerActivity(

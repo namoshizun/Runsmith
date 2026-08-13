@@ -11,6 +11,7 @@ import runsmith.supervisor as supervisor_module
 from runsmith.decorators import actor
 from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerFSM, DefaultWorkerState
 from runsmith.errors import (
+    DuplicateWorkerNameError,
     IncompatibleExecutorTypeError,
     IncompatibleWorkerTypeError,
     NoWorkersRegisteredError,
@@ -247,6 +248,19 @@ def test_sync_supervisor_rejects_incompatible_types() -> None:
 
     with pytest.raises(IncompatibleWorkerTypeError):
         AsyncSupervisor("s").register_workers(QuickSyncWorker("w"))  # type: ignore[arg-type]
+
+
+def test_register_workers_rejects_duplicate_names() -> None:
+    sup = SyncSupervisor("s", "thread")
+    sup.register_workers(QuickSyncWorker("w"))
+
+    with pytest.raises(DuplicateWorkerNameError, match=r"\[w\]"):
+        sup.register_workers(QuickSyncWorker("w"))
+
+    with pytest.raises(DuplicateWorkerNameError, match=r"\[dup\]"):
+        sup.register_workers(QuickSyncWorker("dup"), QuickSyncWorker("dup"))
+
+    assert set(sup._worker_templates) == {"w"}  # pyright: ignore[reportPrivateUsage]
 
 
 def test_sync_supervisor_run_raises_on_async_callback() -> None:

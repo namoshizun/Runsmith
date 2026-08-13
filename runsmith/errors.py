@@ -6,6 +6,11 @@ class IncompatibleWorkerTypeError(ValueError):
     pass
 
 
+class DuplicateWorkerNameError(ValueError):
+    def __init__(self, name: str):
+        super().__init__(f"Worker name [{name}] is already registered")
+
+
 class InvalidStateMachineError(ValueError):
     pass
 

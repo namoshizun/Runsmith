@@ -15,6 +15,7 @@ from loguru import logger
 
 from runsmith.defaults import DefaultWorkerEvent, SupervisorFSM, SupervisorState
 from runsmith.errors import (
+    DuplicateWorkerNameError,
     IncompatibleExecutorTypeError,
     IncompatibleWorkerTypeError,
     NoWorkersRegisteredError,
@@ -99,6 +100,16 @@ class SupervisorBase(Generic[WorkerT]):
         if self._activity_queue is None:
             raise RuntimeError("Activity queue not yet initialized")
         return self._activity_queue
+
+    def _register_workers(self, *workers: WorkerT):
+        occupied = set(self._worker_templates)
+        for worker in workers:
+            if worker.name in occupied:
+                raise DuplicateWorkerNameError(worker.name)
+            occupied.add(worker.name)
+
+        for worker in workers:
+            self._worker_templates[worker.name] = worker
 
     def materialize_units(self, *, worker_name: str | None = None, generation: int = 0):
         for worker in self._worker_templates.values():
@@ -291,8 +302,7 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker[SupervisorState, Def
                 "SyncSupervisor can only supervise instances of SyncWorkers"
             )
 
-        for worker in workers:
-            self._worker_templates[worker.name] = worker
+        self._register_workers(*workers)
 
     def run(self, on_activity: SyncOnActivityCallback = noop):
         if inspect.iscoroutinefunction(on_activity):
@@ -377,8 +387,7 @@ class AsyncSupervisor(
                 "AsyncSupervisor can only supervise instances of AsyncWorkers"
             )
 
-        for worker in workers:
-            self._worker_templates[worker.name] = worker
+        self._register_workers(*workers)
 
     async def run(self, on_activity: AsyncOnActivityCallback = anoop):
         if not inspect.iscoroutinefunction(on_activity):
