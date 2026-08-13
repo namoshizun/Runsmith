@@ -1,5 +1,10 @@
 ## Changelog
 
+### 1.2.3 (2026-08-13)
+
+- fix: reject duplicate worker names at registration with `DuplicateWorkerNameError`.
+- fix: cache actor functions on the worker instance so retired incarnations can be garbage-collected
+
 ### 1.2.2 (2026-08-07)
 
 - feat: custom worker `__init__` args are captured automatically so `clone()` can rebuild the same instance (by [@Weibin74](https://github.com/Weibin74))
