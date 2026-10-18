@@ -1,70 +1,81 @@
 from __future__ import annotations
 
+import asyncio
 import threading
+from contextlib import aclosing, closing
+from typing import Literal
 
 import pytest
 
+from runsmith.decorators import actor
+from runsmith.defaults import DefaultWorkerEvent, DefaultWorkerState
 from runsmith.execution import drive_async_worker, drive_sync_worker
-from runsmith.worker import WorkerActivity
+from runsmith.worker import AsyncWorker, SyncWorker
 
 
-def _activity(kind: str) -> WorkerActivity:
-    transition = ("running", "terminate", "terminating") if kind == "transition_begin" else None
-    return WorkerActivity(worker_name="worker", kind=kind, transition=transition)
+class CooperativeSyncWorker(SyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    @actor("starting")
+    def setup(self) -> DefaultWorkerEvent:
+        return self.emit("run")
+
+    @actor("running")
+    def work(self) -> DefaultWorkerEvent | Literal["keepalive"]:
+        return self.emit("complete" if self.ctx.cmd == "stop" else "keepalive")
+
+    @actor("terminating")
+    def cleanup(self) -> DefaultWorkerEvent:
+        assert self.ctx.cmd == "stop"
+        return self.emit("complete")
 
 
-def test_drive_sync_worker_repeats_stop_until_transition_begins() -> None:
-    commands: list[str | None] = []
+class CooperativeAsyncWorker(AsyncWorker[DefaultWorkerState, DefaultWorkerEvent]):
+    @actor("starting")
+    async def setup(self) -> DefaultWorkerEvent:
+        return self.emit("run")
 
-    def execution():
-        cmd = yield _activity("heartbeat")
-        while True:
-            commands.append(cmd)
-            if cmd == "stop" and commands.count("stop") < 3:
-                cmd = yield _activity("heartbeat")
-                continue
+    @actor("running")
+    async def work(self) -> DefaultWorkerEvent | Literal["keepalive"]:
+        return self.emit("complete" if self.ctx.cmd == "stop" else "keepalive")
 
-            if cmd == "stop":
-                cmd = yield _activity("transition_begin")
-                continue
+    @actor("terminating")
+    async def cleanup(self) -> DefaultWorkerEvent:
+        assert self.ctx.cmd == "stop"
+        return self.emit("complete")
 
-            cmd = yield _activity("heartbeat")
 
+@pytest.mark.parametrize("stop_after", range(7))
+def test_sync_stop_persists_through_startup_and_cleanup(stop_after: int) -> None:
+    worker = CooperativeSyncWorker("worker")
     term_event = threading.Event()
-    driver = drive_sync_worker(execution(), term_event)
+    with closing(worker.main_loop()) as execution:
+        driver = drive_sync_worker(execution, term_event)
+        for _ in range(stop_after):
+            next(driver)
+        term_event.set()
+        # Bound the regression: a lost stop would otherwise keep running forever.
+        for _ in range(12):
+            try:
+                next(driver)
+            except StopIteration:
+                break
 
-    assert next(driver).kind == "heartbeat"
-
-    term_event.set()
-    assert next(driver).kind == "transition_begin"
-    assert next(driver).kind == "heartbeat"
-    assert commands == ["stop", "stop", "stop", "tick"]
+        assert list(worker.ctx.history)[-1] == ("complete", "stopped")
 
 
 @pytest.mark.asyncio
-async def test_drive_async_worker_repeats_stop_until_transition_begins() -> None:
-    commands: list[str | None] = []
+@pytest.mark.parametrize("stop_after", range(7))
+async def test_async_stop_persists_through_startup_and_cleanup(stop_after: int) -> None:
+    worker = CooperativeAsyncWorker("worker")
+    term_event = asyncio.Event()
+    async with aclosing(worker.main_loop()) as execution:
+        driver = drive_async_worker(execution, term_event)
+        for _ in range(stop_after):
+            await driver.__anext__()
+        term_event.set()
+        for _ in range(12):
+            try:
+                await driver.__anext__()
+            except StopAsyncIteration:
+                break
 
-    async def execution():
-        cmd = yield _activity("heartbeat")
-        while True:
-            commands.append(cmd)
-            if cmd == "stop" and commands.count("stop") < 3:
-                cmd = yield _activity("heartbeat")
-                continue
-
-            if cmd == "stop":
-                cmd = yield _activity("transition_begin")
-                continue
-
-            cmd = yield _activity("heartbeat")
-
-    term_event = threading.Event()
-    driver = drive_async_worker(execution(), term_event)
-
-    assert (await driver.__anext__()).kind == "heartbeat"
-
-    term_event.set()
-    assert (await driver.__anext__()).kind == "transition_begin"
-    assert (await driver.__anext__()).kind == "heartbeat"
-    assert commands == ["stop", "stop", "stop", "tick"]
+        assert list(worker.ctx.history)[-1] == ("complete", "stopped")

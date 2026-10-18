@@ -79,6 +79,12 @@ A valid `StateMachine` must satisfy all of the following:
 
 ```
 
+## Restart termination
+
+An unhealthy worker receives one forceful termination request. Its supervision unit remains registered until the executor exits; only then does a later supervision tick start the replacement and consume a restart attempt. This allows coroutine cancellation cleanup to finish and prevents overlapping incarnations.
+
+Thread termination is best effort: Python cannot interrupt a thread blocked in a native call. Such a worker remains pending until it exits, rather than starting another incarnation alongside it.
+
 ## Lifecycle hooks
 
 `@pre` and `@post` decorators register callbacks that run on transitions. They keep side effects and bookkeeping out of core actor logic.

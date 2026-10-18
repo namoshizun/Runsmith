@@ -27,7 +27,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self  # pyright: ignore[reportUnreachable]
 
-from runsmith.core import EXIT_SIGNALS, IAsyncQueue, IBlockingQueue
+from runsmith.core import EXIT_SIGNALS, IAsyncQueue, IBlockingQueue, WorkerRunContext
 from runsmith.decorators import actor, post
 from runsmith.evaluator import WorkerStatusEvaluator
 from runsmith.execution import (
@@ -71,22 +71,43 @@ class SupervisionUnit(Generic[WorkerT]):
     evaluator: WorkerStatusEvaluator
     restart_quota: int
     restart_count: int = 0
-    retired: bool = False
+    kill_requested: bool = False
 
     def retryable(self) -> bool:
         return self.restart_count < self.restart_quota
 
     def status(self, now: float) -> UnitStatus:
+        if self.kill_requested:
+            if self.executor.is_alive():
+                return UnitStatus.LINGERING
+            return UnitStatus.FAILED
+
         if self.executor.is_alive():
-            return UnitStatus.HEALTHY if self.evaluator.is_healthy(now) else UnitStatus.LINGERING
+            if self.evaluator.is_healthy(now):
+                return UnitStatus.HEALTHY
+            return UnitStatus.LINGERING
 
         if self.evaluator.terminal_outcome() is Terminal.OK:
             return UnitStatus.COMPLETED
 
         return UnitStatus.FAILED
 
+    def kill(self) -> None:
+        """
+        Force kill the executor is best-effort based.
+        - process: guaranteed
+        - thread: no guarantee at all
+        - coroutine: until next event loop tick
+        """
+        if not self.kill_requested:
+            self.executor.kill()
+            self.kill_requested = True
+
 
 class SupervisorBase(Generic[WorkerT]):
+    # Set by the worker mixin's __init__; declared here for typing
+    ctx: WorkerRunContext
+
     def __init__(self, executor_type: Literal["thread", "process", "coroutine"]):
         self._activity_queue: (
             IBlockingQueue[WorkerActivity] | IAsyncQueue[WorkerActivity] | None
@@ -156,15 +177,17 @@ class SupervisorBase(Generic[WorkerT]):
             )
 
     def restart_unit(self, name: str) -> SupervisionUnit[WorkerT]:
+        """Request termination; replace the unit once its executor has exited."""
         unit = self.units[name]
+
+        if unit.executor.is_alive():
+            unit.kill()
+            return unit
 
         # Destroy the original unit
         restart_count = unit.restart_count + 1
         next_generation = unit.worker.generation + 1
         logger.warning(f"Restarting crashed worker [{name}] for the {restart_count}th time...")
-
-        if unit.executor.is_alive():
-            unit.executor.kill()
 
         del self.units[name]
 
@@ -191,7 +214,7 @@ class SupervisorBase(Generic[WorkerT]):
         for unit in self.units.values():
             executor = unit.executor
             if executor.is_alive():
-                executor.kill()
+                unit.kill()
 
     def drain_activity_queue(self):
         # Cap each pass so a chatty producer cannot starve the rest of the tick.
@@ -214,11 +237,15 @@ class SupervisorBase(Generic[WorkerT]):
                 # Prior incarnation — expected after kill/restart; drop it.
                 continue
 
+            # Heartbeats cannot prolong shutdown when a worker ignores stop.
+            if activity.kind == "heartbeat" and unit.executor.term_event.is_set():
+                continue
+
             unit.evaluator.record(activity)
 
-    @property
-    def all_units_retired(self) -> bool:
-        return all(unit.retired for unit in self.units.values())
+    def all_units_completed(self) -> bool:
+        now = time.monotonic()
+        return all(unit.status(now) is UnitStatus.COMPLETED for unit in self.units.values())
 
     @property
     def all_executors_down(self) -> bool:
@@ -227,21 +254,15 @@ class SupervisorBase(Generic[WorkerT]):
     def supervise_units(self):
         now = time.monotonic()
         for name, unit in tuple(self.units.items()):
-            if unit.retired:
-                continue
-
             match unit.status(now):
-                case UnitStatus.HEALTHY:
+                case UnitStatus.HEALTHY | UnitStatus.COMPLETED:
                     continue
-                case UnitStatus.COMPLETED:
-                    logger.info(f"Worker [{name}] completed its work, retiring it")
-                    unit.retired = True
                 case UnitStatus.LINGERING | UnitStatus.FAILED:
                     if not unit.retryable():
                         logger.critical(
                             f"Worker [{name}] is beyond repair after {unit.restart_count} restarts"
                         )
-                        raise RetryExhaustedError()
+                        raise RetryExhaustedError(f"Worker [{name}] exhausted its restart quota")
 
                     self.restart_unit(name)
 
@@ -250,7 +271,7 @@ class SupervisorBase(Generic[WorkerT]):
         for name, unit in self.units.items():
             if unit.status(now) is UnitStatus.LINGERING:
                 logger.info(f"Killing lingering worker [{name}]")
-                unit.executor.kill()
+                unit.kill()
 
     def supervision_tick(self) -> DefaultWorkerEvent | Literal["keepalive"]:
         if not self.units:
@@ -259,11 +280,12 @@ class SupervisorBase(Generic[WorkerT]):
         self.drain_activity_queue()
         try:
             self.supervise_units()
-        except RetryExhaustedError:
+        except RetryExhaustedError as exc:
+            self.ctx.set_exception(exc)
             return "error"
 
         # Supervisor stops when all works proactively terminated
-        if self.all_units_retired:
+        if self.all_units_completed():
             return "complete"
 
         return "keepalive"
@@ -304,7 +326,7 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker[SupervisorState, Def
 
         self._register_workers(*workers)
 
-    def run(self, on_activity: SyncOnActivityCallback = noop):
+    def run(self, on_activity: SyncOnActivityCallback = noop) -> None:
         if inspect.iscoroutinefunction(on_activity):
             raise TypeError("on_activity must be a sync callback for sync supervisors")
 
@@ -317,6 +339,9 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker[SupervisorState, Def
         for activity in drive_sync_worker(self.main_loop(), term_event):
             on_activity(activity)
 
+        if (exc := self.ctx.exception) is not None:
+            raise exc
+
     def before_exit(self, is_graceful: bool):
         if not is_graceful:
             self.kill_executors()
@@ -324,29 +349,19 @@ class SyncSupervisor(SupervisorBase[SyncWorker], SyncWorker[SupervisorState, Def
     # ── FSM actors ──────────────────────────────────────────────
     @actor("starting")
     def _boot(self):
-        try:
-            # Initialize the activity queue
-            if self.executor_type == "thread":
-                self._activity_queue = Queue[WorkerActivity](
-                    maxsize=settings.activity_queue_maxsize
-                )
-            else:
-                self._activity_queue = multiprocessing.Queue(
-                    maxsize=settings.activity_queue_maxsize
-                )
+        # Initialize the activity queue
+        if self.executor_type == "thread":
+            self._activity_queue = Queue[WorkerActivity](maxsize=settings.activity_queue_maxsize)
+        else:
+            self._activity_queue = multiprocessing.Queue(maxsize=settings.activity_queue_maxsize)
 
-            # Materialize and start all the units
-            self.materialize_units()
-            self.start_executors()
-            logger.opt(colors=True).info(
-                f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
-            )
-            return self.emit("run")
-        except NoWorkersRegisteredError:
-            logger.critical(
-                f"Supervisor [{self.name}] failed to start due to no workers registered!!"
-            )
-            return self.emit("error")
+        # Materialize and start all the units
+        self.materialize_units()
+        self.start_executors()
+        logger.opt(colors=True).info(
+            f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
+        )
+        return self.emit("run")
 
     @actor("running", min_interval=settings.supervision_interval)
     def _supervise(self):
@@ -389,7 +404,7 @@ class AsyncSupervisor(
 
         self._register_workers(*workers)
 
-    async def run(self, on_activity: AsyncOnActivityCallback = anoop):
+    async def run(self, on_activity: AsyncOnActivityCallback = anoop) -> None:
         if not inspect.iscoroutinefunction(on_activity):
             raise TypeError("on_activity must be an async callback for async supervisors")
 
@@ -411,6 +426,9 @@ class AsyncSupervisor(
         await callbacks.drain()
         callbacks.flush_errors()
 
+        if (exc := self.ctx.exception) is not None:
+            raise exc
+
     def before_exit(self, is_graceful: bool):
         if not is_graceful:
             self.kill_executors()
@@ -418,24 +436,18 @@ class AsyncSupervisor(
     # ── FSM actors ──────────────────────────────────────────────
     @actor("starting")
     async def _boot(self):
-        try:
-            # Initialize the activity queue
-            self._activity_queue = asyncio.Queue[WorkerActivity](
-                maxsize=settings.activity_queue_maxsize
-            )
+        # Initialize the activity queue
+        self._activity_queue = asyncio.Queue[WorkerActivity](
+            maxsize=settings.activity_queue_maxsize
+        )
 
-            # Materialize and start all the units
-            self.materialize_units()
-            self.start_executors()
-            logger.opt(colors=True).info(
-                f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
-            )
-            return self.emit("run")
-        except NoWorkersRegisteredError:
-            logger.critical(
-                f"Supervisor [{self.name}] failed to start due to no workers registered!!"
-            )
-            return self.emit("error")
+        # Materialize and start all the units
+        self.materialize_units()
+        self.start_executors()
+        logger.opt(colors=True).info(
+            f"<e>Supervisor [{self.name}] booted {len(self.units)} units</e>"
+        )
+        return self.emit("run")
 
     @actor("running", min_interval=settings.supervision_interval)
     async def _supervise(self):

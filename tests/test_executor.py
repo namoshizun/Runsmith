@@ -235,6 +235,27 @@ async def test_coroutine_executor_awaits_on_full_queue_without_crashing() -> Non
 
 
 @pytest.mark.asyncio
+async def test_coroutine_executor_closes_worker_when_cancelled_during_queue_put() -> None:
+    exited = asyncio.Event()
+
+    class Worker(ChattyAsyncWorker):
+        def before_exit(self, is_graceful: bool) -> None:
+            exited.set()
+
+    activity_queue: asyncio.Queue[WorkerActivity] = asyncio.Queue(maxsize=1)
+    executor = CoroutineExecutor(Worker("worker"), asyncio.Event(), activity_queue)
+    executor.start()
+    await asyncio.sleep(0)
+    assert activity_queue.full()
+    assert executor.is_alive()
+
+    executor.kill()
+    await asyncio.sleep(0)
+    assert not executor.is_alive()
+    assert exited.is_set()
+
+
+@pytest.mark.asyncio
 async def test_coroutine_executor_retrieves_crash_exception() -> None:
     """A crashed worker must not leak an un-retrieved asyncio task exception.
 

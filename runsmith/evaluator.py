@@ -75,9 +75,9 @@ class WorkerStatusEvaluator:
             case "transition_begin":
                 assert activity.transition is not None
                 src, _, tgt = activity.transition
-                timeout = constraints.transition_timeouts.get((src, tgt))
+                timeout = constraints.transition_timeouts.get((src, tgt), math.inf)
 
-                exp.transition_deadline = ts + timeout if timeout else math.inf
+                exp.transition_deadline = ts + timeout
                 exp.reset_heartbeat()
                 exp.reset_state_expiry()
 
@@ -101,8 +101,8 @@ class WorkerStatusEvaluator:
 
             case "heartbeat":
                 # Update the next heartbeat's expected arrival time
-                timeout = constraints.heartbeat_timeouts.get(exp.state)
-                exp.next_heartbeat = ts + timeout if timeout else math.inf
+                timeout = constraints.heartbeat_timeouts.get(exp.state, math.inf)
+                exp.next_heartbeat = ts + timeout
 
     def is_healthy(self, now: float) -> bool:
         exp = self._expectation

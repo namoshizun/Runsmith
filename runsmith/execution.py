@@ -3,6 +3,7 @@ import multiprocessing
 import signal
 import threading
 from collections.abc import AsyncGenerator, Generator
+from contextlib import aclosing, closing
 from typing import Any, Protocol, TypeVar
 
 from loguru import logger
@@ -43,17 +44,9 @@ def drive_sync_worker(
     yield next(execution)
 
     try:
-        # Phase 1: Executing activities
-        while not term_event.is_set():
-            yield execution.send("tick")
-        # Phase 2: Stop-and-handshake
-        activity = execution.send("stop")
-        while activity.kind != "transition_begin":
-            activity = execution.send("stop")
-        yield activity
-        # Phase 3: Termination activities
+        # A stop request persists through every remaining state transition.
         while True:
-            yield execution.send("tick")
+            yield execution.send("stop" if term_event.is_set() else "tick")
     except StopIteration:
         return
 
@@ -64,17 +57,8 @@ async def drive_async_worker(
     yield await execution.asend(None)
 
     try:
-        # Phase 1: Executing activities
-        while not term_event.is_set():
-            yield await execution.asend("tick")
-        # Phase 2: Stop-and-handshake
-        activity = await execution.asend("stop")
-        while activity.kind != "transition_begin":
-            activity = await execution.asend("stop")
-        yield activity
-        # Phase 3: Termination activities
         while True:
-            yield await execution.asend("tick")
+            yield await execution.asend("stop" if term_event.is_set() else "tick")
     except StopAsyncIteration:
         return
 
@@ -95,8 +79,9 @@ class ThreadExecutor(threading.Thread):
         self.activity_queue = activity_queue
 
     def run(self):
-        for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
-            self.activity_queue.put(activity)
+        with closing(self.worker.main_loop()) as execution:
+            for activity in drive_sync_worker(execution, self.term_event):
+                self.activity_queue.put(activity)
 
     def stop(self):
         self.term_event.set()
@@ -135,8 +120,9 @@ class ProcessExecutor(multiprocessing.Process):
         for sig in EXIT_SIGNALS:
             signal.signal(sig, signal.Handlers.SIG_IGN)
 
-        for activity in drive_sync_worker(self.worker.main_loop(), self.term_event):
-            self.activity_queue.put(activity)
+        with closing(self.worker.main_loop()) as execution:
+            for activity in drive_sync_worker(execution, self.term_event):
+                self.activity_queue.put(activity)
 
     def stop(self):
         self.term_event.set()
@@ -156,8 +142,9 @@ class CoroutineExecutor:
         self.__task = None
 
     async def _task(self):
-        async for activity in drive_async_worker(self.worker.main_loop(), self.term_event):
-            await self.activity_queue.put(activity)
+        async with aclosing(self.worker.main_loop()) as execution:
+            async for activity in drive_async_worker(execution, self.term_event):
+                await self.activity_queue.put(activity)
 
     def _on_task_done(self, task: asyncio.Task[None]) -> None:
         if task.cancelled():

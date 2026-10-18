@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from queue import Queue
@@ -15,6 +16,7 @@ from runsmith.errors import (
     IncompatibleExecutorTypeError,
     IncompatibleWorkerTypeError,
     NoWorkersRegisteredError,
+    RetryExhaustedError,
 )
 from runsmith.evaluator import WorkerStatusEvaluator
 from runsmith.execution import ProcessExecutor, drive_sync_worker
@@ -236,6 +238,142 @@ def test_sync_supervisor_materializes_units_and_drains_activity() -> None:
     assert list(unit.worker.ctx.history)[-1] == ("complete", "stopped")
 
 
+def test_shutdown_ignores_heartbeats_but_records_transitions() -> None:
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor._activity_queue = Queue()
+    supervisor.register_workers(QuickSyncWorker("worker"))
+    supervisor.materialize_units()
+    unit = supervisor.units["worker"]
+    now = time.monotonic()
+    unit.evaluator.record(
+        WorkerActivity(
+            worker_name="worker",
+            kind="transition_end",
+            transition=("starting", "run", "running"),
+            timestamp=now,
+        )
+    )
+    unit.executor.stop()
+    supervisor.activity_queue.put(
+        WorkerActivity(worker_name="worker", kind="heartbeat", timestamp=now + 1)
+    )
+    supervisor.drain_activity_queue()
+    assert not unit.evaluator.is_healthy(now + 2.5)
+
+    supervisor.activity_queue.put(
+        WorkerActivity(
+            worker_name="worker",
+            kind="transition_end",
+            transition=("terminating", "complete", "stopped"),
+        )
+    )
+    supervisor.drain_activity_queue()
+    assert unit.evaluator.terminal_outcome() is supervisor_module.Terminal.OK
+
+
+def test_restart_waits_for_blocked_thread_to_exit() -> None:
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+
+    class BlockingWorker(QuickSyncWorker):
+        @actor("running")
+        def running(self) -> DefaultWorkerEvent:
+            if self.generation == 0:
+                entered.set()
+                release.wait()
+            else:
+                assert exited.is_set()
+            return self.emit("complete")
+
+        def before_exit(self, is_graceful: bool) -> None:
+            if self.generation == 0:
+                exited.set()
+
+    supervisor = SyncSupervisor("root", "thread")
+    supervisor._activity_queue = Queue()
+    supervisor.register_workers(BlockingWorker("worker"))
+    supervisor.materialize_units()
+    supervisor.start_executors()
+    old = supervisor.units["worker"]
+    # Model a native wait that kill cannot interrupt; avoid injecting into its locks.
+    old.executor.kill = MagicMock()
+    try:
+        assert entered.wait(timeout=1)
+        assert supervisor.restart_unit("worker") is old
+        assert old.executor.is_alive()
+        assert supervisor.restart_unit("worker") is old
+        assert old.restart_count == 0
+    finally:
+        release.set()
+        old.executor.join(timeout=1)  # type: ignore[union-attr]
+
+    assert not old.executor.is_alive()
+    new = supervisor.restart_unit("worker")
+    new.executor.join(timeout=1)  # type: ignore[union-attr]
+    assert not new.executor.is_alive()
+    assert new.worker.generation == 1
+    assert new.restart_count == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_waits_for_coroutine_cleanup_without_repeated_cancellation() -> None:
+    entered, cleaning, release, exited = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+
+    class CleanupWorker(QuickAsyncWorker):
+        @actor("running")
+        async def running(self) -> DefaultWorkerEvent:
+            if self.generation == 0:
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cleaning.set()
+                    await release.wait()
+            else:
+                assert exited.is_set()
+            return self.emit("complete")
+
+        def before_exit(self, is_graceful: bool) -> None:
+            if self.generation == 0:
+                exited.set()
+
+    supervisor = AsyncSupervisor("root")
+    supervisor.register_workers(CleanupWorker("worker"))
+    await supervisor._boot()
+    old = supervisor.units["worker"]
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        supervisor.drain_activity_queue()
+        _poison_evaluator(old)
+        assert supervisor.supervision_tick() == "keepalive"
+        await asyncio.wait_for(cleaning.wait(), timeout=1)
+        for _ in range(3):
+            supervisor.supervision_tick()
+            await asyncio.sleep(0)
+            assert supervisor.units["worker"] is old
+            assert old.executor.is_alive()
+            assert old.restart_count == 0
+    finally:
+        release.set()
+        await asyncio.wait_for(exited.wait(), timeout=1)
+        await asyncio.sleep(0)
+
+    assert not old.executor.is_alive()
+    supervisor.supervision_tick()
+    new = supervisor.units["worker"]
+    assert new is not old
+    assert new.worker.generation == 1
+    assert new.restart_count == 1
+    await asyncio.sleep(0)
+    assert not new.executor.is_alive()
+    supervisor.supervision_tick()
+    assert new.status(time.monotonic()) is UnitStatus.COMPLETED
+
+
 # ── API contracts ─────────────────────────────────────────────────────────────
 
 
@@ -303,6 +441,13 @@ def test_supervise_restarts_dead_retryable_and_lingering_units(
 
     assert sup._supervise() == "keepalive"
     assert sup.units["dead"].restart_count == 1
+    assert sup.units["linger"] is linger
+    linger.executor.kill.assert_called_once()
+    assert linger.restart_count == 0
+
+    # Only an observed exit permits replacement.
+    linger.executor.is_alive.return_value = False
+    assert sup._supervise() == "keepalive"
     assert sup.units["linger"].restart_count == 1
     for name in ("dead", "linger"):
         sup.units[name].executor.join(timeout=2.0)  # type: ignore[union-attr]
@@ -345,7 +490,7 @@ def test_supervise_retires_completed_and_escalates_when_quota_exhausted(
     )
 
     assert sup._supervise() == "error"
-    assert done.retired
+    assert done.status(time.monotonic()) is UnitStatus.COMPLETED
     assert done.restart_count == 0
     assert sup.fsm.get_target_state("running", "error") == "reaping"
 
@@ -411,7 +556,7 @@ def test_sync_supervisor_run_returns_after_one_shot_completion(
     supervisor.run()
 
     assert list(supervisor.units["one-shot"].worker.ctx.history)[-1] == ("complete", "stopped")
-    assert supervisor.units["one-shot"].retired
+    assert supervisor.units["one-shot"].status(time.monotonic()) is UnitStatus.COMPLETED
     assert supervisor.units["one-shot"].restart_count == 0
 
 
@@ -427,7 +572,8 @@ def test_sync_supervisor_reaches_crashed_after_reaping_subtree(
 
     supervisor = SyncSupervisor("root", "thread")
     supervisor.register_workers(CrashingSyncWorker("crashy"))
-    supervisor.run()
+    with pytest.raises(RetryExhaustedError, match="crashy"):
+        supervisor.run()
 
     assert list(supervisor.ctx.history)[-2:] == [
         ("error", "reaping"),
@@ -452,7 +598,8 @@ def test_nested_parent_restarts_a_crashed_child_supervisor(
     child.register_workers(CrashingSyncWorker("crashy"))
     root = SyncSupervisor("root", "thread")
     root.register_workers(child)
-    root.run()
+    with pytest.raises(RetryExhaustedError, match="child"):
+        root.run()
 
     assert root.units["child"].restart_count == 1
     assert root.all_executors_down
@@ -525,8 +672,59 @@ async def test_async_supervisor_run_returns_after_one_shot_completion(
     await supervisor.run()
 
     assert list(supervisor.units["one-shot"].worker.ctx.history)[-1] == ("complete", "stopped")
-    assert supervisor.units["one-shot"].retired
+    assert supervisor.units["one-shot"].status(time.monotonic()) is UnitStatus.COMPLETED
     assert supervisor.units["one-shot"].restart_count == 0
+
+
+@pytest.mark.asyncio
+async def test_async_root_reports_retry_exhaustion_after_reaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleaned = asyncio.Event()
+
+    class CrashingWorker(QuickAsyncWorker):
+        @actor("starting")
+        async def setup(self) -> DefaultWorkerEvent:
+            return self.emit("error")
+
+    class LiveWorker(QuickAsyncWorker):
+        @actor("running")
+        async def running(self) -> str:
+            if self.ctx.cmd == "stop":
+                return self.emit("complete")
+            await asyncio.sleep(0.001)
+            return self.emit("keepalive")
+
+        @actor("terminating")
+        async def teardown(self) -> DefaultWorkerEvent:
+            cleaned.set()
+            return self.emit("complete")
+
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    monkeypatch.setattr(supervisor_module, "settings", RunsmithSettings(worker_restart_quota=0))
+    supervisor = AsyncSupervisor("root")
+    supervisor.register_workers(CrashingWorker("crashy"), LiveWorker("live"))
+
+    with pytest.raises(RetryExhaustedError, match="crashy"):
+        await supervisor.run()
+
+    assert list(supervisor.ctx.history)[-1] == ("complete", "crashed")
+    assert supervisor.all_executors_down
+    assert cleaned.is_set()
+    assert list(supervisor.units["live"].worker.ctx.history)[-1] == ("complete", "stopped")
+
+
+def test_sync_root_reports_empty_registration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    with pytest.raises(NoWorkersRegisteredError):
+        SyncSupervisor("root", "thread").run()
+
+
+@pytest.mark.asyncio
+async def test_async_root_reports_empty_registration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(supervisor_module, "EXIT_SIGNALS", tuple())
+    with pytest.raises(NoWorkersRegisteredError):
+        await AsyncSupervisor("root").run()
 
 
 def test_process_executor_path_materializes_and_runs(
@@ -545,4 +743,4 @@ def test_process_executor_path_materializes_and_runs(
     supervisor.run()
 
     assert isinstance(supervisor.units["one-shot"].executor, ProcessExecutor)
-    assert supervisor.units["one-shot"].retired
+    assert supervisor.units["one-shot"].status(time.monotonic()) is UnitStatus.COMPLETED
