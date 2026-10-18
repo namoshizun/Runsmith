@@ -1,5 +1,10 @@
 ## Changelog
 
+### 1.2.4 (2026-10-18)
+
+- fix: make sure an unhealthy worker is killed only once, and be replaced only after the executor exits.
+- fix: the root supervisor should exit with errors if retry exhausted.
+
 ### 1.2.3 (2026-08-13)
 
 - fix: reject duplicate worker names at registration with `DuplicateWorkerNameError`.
